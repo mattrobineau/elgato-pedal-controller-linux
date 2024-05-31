@@ -1,5 +1,6 @@
 use std::{fmt::Debug, time::{Duration, Instant}};
 use std::thread::sleep;
+use config_file_setup::{ButtonConfig, SettingsManager};
 use enigo::{
   Button, Direction::{Press, Release}, Enigo, Key, Keyboard, Mouse, Settings
 };
@@ -22,15 +23,15 @@ struct ButtonPress {
 struct ButtonPressManager {
     presses: Vec<ButtonPress>,
     last_processed_time: Instant,
-    button_config: config_file_setup::Config,
+    
 }
 
 impl ButtonPressManager {
     fn new() -> Self {
+        config_file_setup::SettingsManager::new(Some(".config/elgato_pedal_controller.config.json".to_string()));
         ButtonPressManager {
             presses: Vec::new(),
             last_processed_time: Instant::now(),
-            button_config: config_file_setup::get_config(".config/elgato_pedal_controller.config.json").expect("Could not find a config file")
         }
     }
 
@@ -91,14 +92,15 @@ impl ButtonPressManager {
     }
 
     fn data_to_key(&self, data: &[u8]) -> Option<KeyOrButton> {
+        let buttons_config = &SettingsManager::load_config_from_file(None).expect("Error while reading config file from main program.");
         match data {
             [1, 0, 3, 0, button1, button2, button3, 0] => {
                 let combination = (*button1, *button2, *button3);
 
                 match combination {
-                    (1, 0, 0) => Some(self.get_action_type(self.button_config.buttons.get("button_1"))),
-                    (0, 1, 0) => Some(self.get_action_type(self.button_config.buttons.get("button_2"))),
-                    (0, 0, 1) => Some(self.get_action_type(self.button_config.buttons.get("button_3"))),
+                    (1, 0, 0) => Some(self.get_action_type(buttons_config.buttons.get("button_1"))),
+                    (0, 1, 0) => Some(self.get_action_type(buttons_config.buttons.get("button_2"))),
+                    (0, 0, 1) => Some(self.get_action_type(buttons_config.buttons.get("button_3"))),
                     _ => None,
                 }
             }
@@ -119,6 +121,9 @@ impl ButtonPressManager {
         }
     }
 
+
+    
+
     fn interpret_buttons(&self, kob: Option<KeyOrButton>) {
         // println!("Simulating key press for: {:?}", key);
         // Interpret and handle button press data here
@@ -134,11 +139,11 @@ impl ButtonPressManager {
             }
         };
         sleep(Duration::from_millis(100));
-        
         match kob {
             Some(KeyOrButton::Key(key)) => {
                 // Process the key
                 let _ = enigo.key(key, Press);
+                // dbus_signaler::send_signal(key);
                 sleep(Duration::from_millis(100));
                 let _ = enigo.key(key, Release);
             },
@@ -156,7 +161,6 @@ impl ButtonPressManager {
 
 fn main() {
     let mut manager: ButtonPressManager = ButtonPressManager::new();
-    
     let api = HidApi::new().expect("Failed to create HID API instance");
 
     let target_manufacturer = "Elgato";
