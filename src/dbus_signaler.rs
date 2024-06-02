@@ -20,9 +20,9 @@ pub async fn send_signal(signature_key_string: &str, button_name: &str, key_or_b
         .expect("failed to get the DBus object");
    
     let mut msg = Message::signal(
-        "/org/gnome/shell/extensions/unjs".try_into().unwrap(),
-        "org.gnome.shell.extensions.Unjs".try_into().unwrap(),
-        "ExampleSignal".try_into().unwrap(),
+        "/org/gnome/shell/extensions/elgatopedalcompanion".try_into().unwrap(),
+        "org.gnome.shell.extensions.Elgatopedalcompanion".try_into().unwrap(),
+        "PedalActionSignal".try_into().unwrap(),
     );
 
     let button_message = DBusMessage {
