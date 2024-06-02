@@ -13,7 +13,7 @@ Follow this guy's recommendation: https://unix.stackexchange.com/questions/85379
 
 Run this so you don't have to reboot your computer to get the new group applied to your user:
 
-`udevadm control --reload-rules && udevadm trigger`
+`sudo udevadm control --reload-rules && sudo udevadm trigger`
 
 ## Build
 `cargo build`
@@ -64,3 +64,7 @@ There are three actions supported:
 | `button` | Fires a mouse button event. Check out enigo's documentation for information on each [Button](https://docs.rs/enigo/latest/enigo/enum.Button.html) event supported. Useful to control browser navigation,  simulating a scroll event, and clicking. |
 | `key` | Fires a keyboard event. Check out enigo's documentation for information on each [Key](https://docs.rs/enigo/latest/enigo/enum.Key.html) event supported. Useful to simulate pressing special keys, like when software allows you to bind actions to an _"F key"_ (F13, F14, ..., F35) or simulate the "multimedia keys" to control your music while you code without having to move your hands away from your keyboard. |
 | `unicode` | Simulates the pressing of an unicode character (only one for now). Useful to play games with your feet (as long as they can be played with the _WASD_ keys -1), or when you want to pay respects. |
+
+## Companion GNOME Extension
+
+There's a companion GNOME extension that will depict which pedal button has been pressed: https://github.com/UnJavaScripter/elgato-pedal-companion-gnome-extension (Still a WiP, but gets the job done).

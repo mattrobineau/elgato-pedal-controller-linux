@@ -11,6 +11,8 @@ serde_json = "1.0.117"
 enigo = "0.2.1"
 
 [dependencies]
+dbus-async = "~2.3.1"
+dbus-message-parser = "4.3.1"
 hidapi = "2.6.0"
 chrono = "0.4.34"
 enigo = "0.2.1"
@@ -22,7 +24,7 @@ lazy_static = "1.4.0"
 
 [dependencies.tokio]
 version = "~1.15.0"
-features = ["rt"]
+features = ["rt-multi-thread"]
 
 [dependencies.windows-targets]
 version = "0.52.4"
