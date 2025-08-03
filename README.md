@@ -1,70 +1,171 @@
-# An Elgato Streamdeck pedal controller for Linux made in rust
-Yep, that ^.
+# An Elgato Stream Deck Pedal Controller for Linux (Modernized with Token API)
+
+A modern Rust implementation of an Elgato Stream Deck Pedal controller that uses Enigo's Token API for direct JSON-to-action mapping, eliminating the need for build-time code generation.
+
+## Features
+
+🚀 **Modern Token API**: Direct JSON deserialization to Enigo Tokens - no build scripts needed!  
+⚡ **Zero Build Dependencies**: Eliminated `build.rs` and auto-generated `key_definitions.rs`  
+🎯 **Type-Safe Configuration**: Serde-powered JSON configuration with full validation  
+🔧 **Three Action Types**: Single tokens, sequences, and shortcuts  
+🎮 **Demo Mode**: Test your configuration without a physical device  
+📋 **Structured Button Names**: `button_0`, `button_1`, `button_2` (modern naming)
 
 ## Install Dependencies
 
-`sudo apt-get install libxdo-dev`
-`sudo apt-get install libudev-dev`
-`sudo apt install libhidapi-dev`
-`sudo usermod -aG plugdev $USER`
+- **Enigo 0.4.2**: Modern input simulation with Token API and serde support
+- **libudev**: For HID device detection  
+- **libhidapi**: For low-level device communication
 
-## _Fix_ permissions
-Follow this guy's recommendation: https://unix.stackexchange.com/questions/85379/dev-hidraw-read-permissions
+Install on Ubuntu/Debian:
+```bash
+sudo apt install libudev-dev libhidapi-dev
+```
 
-Run this so you don't have to reboot your computer to get the new group applied to your user:
+## Permissions Setup
 
-`sudo udevadm control --reload-rules && sudo udevadm trigger`
+### Add your user to device access groups
 
-## Build
-`cargo build`
+The required group varies by Linux distribution:
 
-## Run
-`./target/x86_64-unknown-linux-gnu/debug/elgato_pedal_controller`
+**Ubuntu/Debian-based systems:**
+```bash
+sudo usermod -aG plugdev $USER
+```
 
+**Arch/Other systems:**
+```bash
+sudo usermod -aG input $USER
+```
 
-## Configuring
-A sample configuration file will be created in `~/.config/elgato_pedal_controller.config.json` during the first run. You can update the file to set your preferred bindings. You will find the bindings inside the `src/key_definitions.rs` file, which is created at build by extracting the linux compatible keys (a few Windows keys remain there because of the regexp I use is not perfect, but they don't bother anyone there).
+### Apply udev rules for HID devices
 
-### Configuration file example
-This repo includes an example configuration file for you to check out, `elgato_pedal_controller.config_example.json` with the following contents:
+Follow this recommendation for proper HID permissions: https://unix.stackexchange.com/questions/85379/dev-hidraw-read-permissions
+
+Reload udev rules without reboot:
+```bash
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+**Note:** You may need to log out and back in for group changes to take effect.
+
+## Build & Run
+
+### Build
+```bash
+cargo build
+```
+
+### Run with real device
+```bash
+cargo run
+```
+
+### Demo Mode (Test without device)
+```bash
+cargo run -- demo
+```
+
+## Token-Based Configuration
+
+The application uses Enigo's modern Token API with direct JSON deserialization. A configuration file will be created automatically at `~/.config/elgato_pedal_controller.config.json` on first run.
+
+### New Configuration Format
 
 ```json
 {
-  "buttons": {
-    "button_1": {
-      "action_type": "button",
-      "action_value": "Right"
-    },
-    "button_2": {
-      "action_type": "key",
-      "action_value": "MediaPlayPause"
-    },
-    "button_3": {
-      "action_type": "unicode",
-      "action_value": "F"
+  "device": {
+    "button_count": 3,
+    "buttons": {
+      "button_0": {
+        "type": "Token",
+        "value": {
+          "Key": [{"Unicode": "h"}, "Click"]
+        }
+      },
+      "button_1": {
+        "type": "Sequence",
+        "value": [
+          {"Text": "Hello World!"},
+          {"Key": ["Return", "Click"]}
+        ]
+      },
+      "button_2": {
+        "type": "Shortcut",
+        "value": "Copy"
+      }
     }
   }
 }
 ```
 
-### Button names
-The buttons are simply named from 1 to 3 begining from the left-most one (This assumes your device's USB-C cable connector is positioned opposite to you, if not the case, adjust accordingly).
-| Button name  | Button position  |
-|---|---|
-| `button_1` | Left  |
-| `button_2` | Middle  |
-| `button_3` | Right  |
+### Button Names (Modern Structure)
 
+Buttons use zero-indexed naming for consistency with programming conventions:
 
-### Action types
-There are three actions supported:
+| Button name  | Physical position | Description |
+|---|---|---|
+| `button_0` | Left | First button (index 0) |
+| `button_1` | Middle | Second button (index 1) |  
+| `button_2` | Right | Third button (index 2) |
 
-| Action name  | Action description  |
-|---|---|
-| `button` | Fires a mouse button event. Check out enigo's documentation for information on each [Button](https://docs.rs/enigo/latest/enigo/enum.Button.html) event supported. Useful to control browser navigation,  simulating a scroll event, and clicking. |
-| `key` | Fires a keyboard event. Check out enigo's documentation for information on each [Key](https://docs.rs/enigo/latest/enigo/enum.Key.html) event supported. Useful to simulate pressing special keys, like when software allows you to bind actions to an _"F key"_ (F13, F14, ..., F35) or simulate the "multimedia keys" to control your music while you code without having to move your hands away from your keyboard. |
-| `unicode` | Simulates the pressing of an unicode character (only one for now). Useful to play games with your feet (as long as they can be played with the _WASD_ keys -1), or when you want to pay respects. |
+*Note: Assumes USB-C connector is positioned away from you*
+
+### Action Types
+
+The modern Token API supports three action types:
+
+| Action Type | Description | Example |
+|---|---|---|
+| **Token** | Single Enigo token (key, button, text, mouse move, scroll) | `{"type": "Token", "value": {"Key": ["F13", "Click"]}}` |
+| **Sequence** | Multiple tokens executed in order | `{"type": "Sequence", "value": [{"Key": ["Control", "Press"]}, {"Key": [{"Unicode": "c"}, "Click"]}, {"Key": ["Control", "Release"]}]}` |
+| **Shortcut** | Predefined shortcuts (Copy, Paste, Undo, etc.) | `{"type": "Shortcut", "value": "Copy"}` |
+
+### Available Shortcuts
+
+- `Copy` (Ctrl+C)
+- `Paste` (Ctrl+V)  
+- `Undo` (Ctrl+Z)
+- `AltTab` (Alt+Tab)
+- `Screenshot` (Print Screen)
+- `VolumeUp`, `VolumeDown`, `Mute`
+- `MediaPlayPause`, `MediaNext`, `MediaPrev`
+
+### Token Examples
+
+**Key Press:**
+```json
+{"Key": ["F13", "Click"]}
+{"Key": [{"Unicode": "a"}, "Press"]}
+```
+
+**Mouse Actions:**
+```json
+{"Button": ["Left", "Click"]}
+{"MoveMouse": [100, 100, "Abs"]}
+{"Scroll": [3, "Vertical"]}
+```
+
+**Text Input:**
+```json
+{"Text": "Hello World!"}
+```
+
+## Legacy Configuration Support
+
+The old configuration format is no longer supported. The new Token API eliminates the need for:
+- ❌ `build.rs` script
+- ❌ Auto-generated `key_definitions.rs`  
+- ❌ Manual string-to-key mapping
+- ❌ Build-time key extraction
+
+## Wayland Compatibility
+
+**Note:** Input simulation may be restricted under Wayland due to security policies. For full functionality:
+- Use X11 session, or  
+- Test with demo mode: `cargo run -- demo`
+- Real device usage typically works regardless of display server
 
 ## Companion GNOME Extension
 
-There's a companion GNOME extension that will depict which pedal button has been pressed: https://github.com/UnJavaScripter/elgato-pedal-companion-gnome-extension (Still a WiP, but gets the job done).
+There's a companion GNOME extension that shows which pedal button has been pressed: [elgato-pedal-companion-gnome-extension](https://github.com/UnJavaScripter/elgato-pedal-companion-gnome-extension) (Work in Progress)
