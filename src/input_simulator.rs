@@ -78,26 +78,26 @@ impl InputSimulator {
         println!("Executing {} actions", actions.len());
         
         for (i, action) in actions.iter().enumerate() {
-            println!("Executing action {}: {:?}", i + 1, action);
+            println!(" ⚙️ Executing action {}: {:?}", i + 1, action);
             
             match action {
                 ExecutableAction::KeyPress { key, auto_release } => {
-                    self.execute_key_press(key.clone(), *auto_release)?;
+                    self.execute_key_press(key.clone(), *auto_release).expect("Failed to execute key press");
                 },
                 ExecutableAction::KeyRelease { key } => {
-                    self.execute_key_release(key.clone())?;
+                    self.execute_key_release(key.clone()).expect("Failed to execute key release");
                 },
                 ExecutableAction::Text { text } => {
-                    self.execute_text(text.clone())?;
+                    self.execute_text(text.clone()).expect("Failed to execute text input");
                 },
                 ExecutableAction::Sleep { duration_ms } => {
-                    self.execute_sleep(*duration_ms)?;
+                    self.execute_sleep(*duration_ms).expect("Failed to execute sleep");
                 },
                 ExecutableAction::ReleaseAfter { duration_ms } => {
                     self.schedule_release_all_after(*duration_ms);
                 },
                 ExecutableAction::ReleaseAll => {
-                    self.execute_release_all()?;
+                    self.schedule_release_all_after(0);
                 },
                 ExecutableAction::ReleaseAllAfter { duration_ms } => {
                     self.schedule_release_all_after(*duration_ms);
@@ -108,9 +108,9 @@ impl InputSimulator {
             std::thread::sleep(Duration::from_millis(10));
         }
         
-        // Process any scheduled releases
-        self.process_scheduled_releases()?;
-        
+        // Note: Scheduled releases will be processed by the main timer loop
+        // This ensures proper timing and avoids conflicts with other timer processing
+
         Ok(())
     }
 
@@ -127,7 +127,7 @@ impl InputSimulator {
                     let release_token = Token::Key(key.clone(), Direction::Release);
                     match self.enigo.execute(&release_token) {
                         Ok(_) => {
-                            println!("Key auto-released successfully: {:?}", key);
+                            println!("Key auto-RELEASING successfully: {:?}", key);
                             self.pressed_keys.remove(&key);
                         },
                         Err(e) => {
@@ -146,6 +146,9 @@ impl InputSimulator {
     }
 
     fn execute_key_release(&mut self, key: Key) -> Result<(), Box<dyn std::error::Error>> {
+        println!("===========================================================");
+        println!(" ⬆️ Executing key release...");
+        println!("===========================================================");
         if self.pressed_keys.contains(&key) {
             let release_token = Token::Key(key.clone(), Direction::Release);
             
@@ -186,30 +189,12 @@ impl InputSimulator {
         Ok(())
     }
 
-    fn execute_release_all(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Releasing all pressed keys ({} keys)", self.pressed_keys.len());
-        
-        let keys_to_release: Vec<Key> = self.pressed_keys.iter().cloned().collect();
-        
-        for key in keys_to_release {
-            let release_token = Token::Key(key.clone(), Direction::Release);
-            
-            match self.enigo.execute(&release_token) {
-                Ok(_) => {
-                    println!("Released key: {:?}", key);
-                    self.pressed_keys.remove(&key);
-                },
-                Err(e) => {
-                    eprintln!("Error releasing key {:?}: {}", key, e);
-                }
-            }
-        }
-        
-        Ok(())
-    }
-
     fn schedule_release_all_after(&mut self, duration_ms: u64) {
-        let release_time = Instant::now() + Duration::from_millis(duration_ms);
+        let release_time = if duration_ms > 0 {
+            Instant::now() + Duration::from_millis(duration_ms)
+        } else {
+            Instant::now()
+        };
         
         // Schedule all currently pressed keys for release
         for key in &self.pressed_keys {
@@ -219,7 +204,7 @@ impl InputSimulator {
         println!("Scheduled {} keys for release after {} ms", self.pressed_keys.len(), duration_ms);
     }
 
-    fn process_scheduled_releases(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn process_scheduled_releases(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
         let mut releases_to_process = Vec::new();
         
@@ -233,19 +218,25 @@ impl InputSimulator {
             }
         });
         
-        // Execute the releases
-        for key in releases_to_process {
-            if self.pressed_keys.contains(&key) {
-                let release_token = Token::Key(key.clone(), Direction::Release);
-                
-                match self.enigo.execute(&release_token) {
-                    Ok(_) => {
-                        println!("Scheduled release executed: {:?}", key);
-                        self.pressed_keys.remove(&key);
-                    },
-                    Err(e) => {
-                        eprintln!("Error executing scheduled release for {:?}: {}", key, e);
+        // Execute the releases only if there are any
+        if !releases_to_process.is_empty() {
+            println!("⏰ Processing {} scheduled key releases", releases_to_process.len());
+            
+            for key in releases_to_process {
+                if self.pressed_keys.contains(&key) {
+                    let release_token = Token::Key(key.clone(), Direction::Release);
+                    
+                    match self.enigo.execute(&release_token) {
+                        Ok(_) => {
+                            println!("   ⬆️ Scheduled release executed: {:?}", key);
+                            self.pressed_keys.remove(&key);
+                        },
+                        Err(e) => {
+                            eprintln!("   ❌ Error executing scheduled release for {:?}: {}", key, e);
+                        }
                     }
+                } else {
+                    println!("   ⚠️  Key {:?} already released", key);
                 }
             }
         }

@@ -1,271 +1,147 @@
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
-use crate::token_based_config::PhysicalButtonName;
-use chrono;
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum ButtonState {
-    IDLE,           // No recent activity
-    EVALUATING,     // Received first signal, evaluating user intent
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum ButtonEventType {
-    PRESSED,
-    HELD,
-    RELEASED,
-}
-
-impl ButtonEventType {
-    pub fn as_str(&self) -> &str {
-        match self {
-            ButtonEventType::PRESSED => "PRESSED",
-            ButtonEventType::HELD => "HELD", 
-            ButtonEventType::RELEASED => "RELEASED",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct ButtonEvent {
-    pub button_name: PhysicalButtonName,
-    pub event_type: ButtonEventType,
-}
-
-#[derive(Debug)]
-struct ButtonTracker {
-    state: ButtonState,
-    first_signal_time: Option<Instant>,
-    last_signal_time: Option<Instant>,
-    signal_count: u32,
-    action_fired: bool,
-}
-
-impl ButtonTracker {
-    fn new() -> Self {
-        Self {
-            state: ButtonState::IDLE,
-            first_signal_time: None,
-            last_signal_time: None,
-            signal_count: 0,
-            action_fired: false,
-        }
-    }
-}
+use std::time::Instant;
+use crate::button_state_machine::{ButtonStateMachine, StateMachineLogic, StateTransition};
+use crate::button_types::{ButtonState, ButtonEvent, ButtonInput, ButtonEventType};
+use crate::hold_intent_state_machine::HoldIntentLogic;
+use crate::token_based_config::{PhysicalButtonName, TokenBasedParser};
 
 pub struct HoldIntentParser {
-    buttons: HashMap<PhysicalButtonName, ButtonTracker>,
-    evaluation_window_ms: u64, // How long to wait for additional signals to determine intent
+    state_machines: HashMap<PhysicalButtonName, ButtonStateMachine<ButtonState>>,
+    logic: HoldIntentLogic,
 }
 
 impl HoldIntentParser {
-    pub fn new() -> Self {
-        let mut buttons = HashMap::new();
-        buttons.insert(PhysicalButtonName::Button1, ButtonTracker::new()); // button_0
-        buttons.insert(PhysicalButtonName::Button2, ButtonTracker::new()); // button_1  
-        buttons.insert(PhysicalButtonName::Button3, ButtonTracker::new()); // button_2
-        
-        Self { 
-            buttons,
-            evaluation_window_ms: 800, // Wait 800ms after first signal to evaluate intent
-        }
+    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        let config_parser = TokenBasedParser::new()?;
+        Ok(Self {
+            state_machines: HashMap::new(),
+            logic: HoldIntentLogic::new(800, 300, config_parser), // 800ms evaluation window, 300ms quick release threshold
+        })
     }
 
-    pub fn parse_hid_data<F, G, H>(&mut self, 
-                                   data: &[u8], 
-                                   now: Instant,
-                                   has_held_action: F,
-                                   has_pressed_action: G, 
-                                   get_hold_threshold: H) -> Vec<ButtonEvent>
+    pub fn parse_hid_data<F>(
+        &mut self,
+        data: &[u8],
+        now: Instant,
+        mut event_handler: F,
+    ) -> Result<(), Box<dyn std::error::Error>>
     where
-        F: Fn(&PhysicalButtonName) -> bool,
-        G: Fn(&PhysicalButtonName) -> bool,
-        H: Fn(&PhysicalButtonName) -> u64,
+        F: FnMut(ButtonEvent),
     {
-        let mut events = Vec::new();
+        // Parse HID data to extract button states
+        let button_states = self.extract_button_states(data);
+        
+        for (button_name, is_pressed) in button_states {
+            let input = ButtonInput { button_name, is_pressed };
+            
+            // Get or create state machine for this button
+            let state_machine = self.state_machines
+                .entry(button_name)
+                .or_insert_with(|| ButtonStateMachine::new(self.logic.initial_state()));
+            
+            // Process the input through the state machine
+            match self.logic.process_input(state_machine, input, now) {
+                StateTransition::Continue => {
+                    // No events to emit, continue processing
+                }
+                StateTransition::EmitEvents(events) => {
+                    for event in events {
+                        // Check if this is a RELEASING event, which should reset the state machine
+                        if matches!(event.event_type, ButtonEventType::RELEASING) {
+                            state_machine.reset(self.logic.initial_state());
+                        }
+                        event_handler(event);
+                    }
+                }
+                StateTransition::Reset => {
+                    state_machine.reset(self.logic.initial_state());
+                }
+            }
+        }
+        
+        // Note: Timeout processing is now handled separately via process_button_timeouts()
+        // This avoids conflicts between HID data processing and timeout logic
+        
+        Ok(())
+    }
 
-        if data.len() < 8 || data[0] != 1 || data[2] != 3 {
-            return events;
+    fn extract_button_states(&self, data: &[u8]) -> Vec<(PhysicalButtonName, bool)> {
+        if data.len() < 8 {
+            return vec![];
         }
 
-        // Check each button state from HID data
-        let button_data = [
-            (PhysicalButtonName::Button1, data[4] != 0), // button_0 (left pedal)
-            (PhysicalButtonName::Button2, data[5] != 0), // button_1 (middle pedal)
-            (PhysicalButtonName::Button3, data[6] != 0), // button_2 (right pedal)
-        ];
+        let mut button_states = vec![];
+        
+        // Extract button states from HID data
+        // Based on the original parsing logic
+        if data[4] & 0x01 != 0 {
+            button_states.push((PhysicalButtonName::Button0, true)); // button_0
+        }
+        if data[5] & 0x01 != 0 {
+            button_states.push((PhysicalButtonName::Button1, true)); // button_1
+        }
+        if data[6] & 0x01 != 0 {
+            button_states.push((PhysicalButtonName::Button2, true)); // button_2
+        }
+        
+        // IMPORTANT: We need to also generate release events for buttons that are no longer pressed
+        // but were previously in a pressed state
+        for (&button_name, state_machine) in &self.state_machines {
+            let button_index = match button_name {
+                PhysicalButtonName::Button0 => 4,
+                PhysicalButtonName::Button1 => 5,
+                PhysicalButtonName::Button2 => 6,
+            };
+            
+            let is_currently_pressed = data[button_index] & 0x01 != 0;
+            let was_in_active_state = matches!(state_machine.state(), 
+                ButtonState::EVALUATING | ButtonState::HELD);
+            
+            if !is_currently_pressed && was_in_active_state {
+                button_states.push((button_name, false));
+            }
+        }
 
-        for (button_name, is_pressed) in button_data {
-            if let Some(tracker) = self.buttons.get_mut(&button_name) {
-                
-                match (tracker.state, is_pressed) {
-                    (ButtonState::IDLE, true) => {
-                        // First signal detected - start evaluation
-                        let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                        println!("[{}] 🔄 Button {} signal detected - starting intent evaluation (state: IDLE->EVALUATING)", timestamp, button_name.as_str());
-                        tracker.state = ButtonState::EVALUATING;
-                        tracker.first_signal_time = Some(now);
-                        tracker.last_signal_time = Some(now);
-                        tracker.signal_count = 1;
-                        tracker.action_fired = false;
-                        
-                        let has_pressed = has_pressed_action(&button_name);
-                        let has_held = has_held_action(&button_name);
-                        let threshold_ms = get_hold_threshold(&button_name);
-                        
-                        println!("[{}] 🔍 Button {} config: has_pressed={}, has_held={}, threshold={}ms, evaluation_window={}ms", 
-                                 timestamp, button_name.as_str(), has_pressed, has_held, threshold_ms, self.evaluation_window_ms);
-                        
-                        if threshold_ms > 0 {
-                            let _threshold_time = now + Duration::from_millis(threshold_ms);
-                            println!("[{}] ⏱️  Hold threshold timer started - will fire HELD at {}", 
-                                     timestamp, 
-                                     chrono::Local::now().checked_add_signed(chrono::Duration::milliseconds(threshold_ms as i64))
-                                         .unwrap_or_else(chrono::Local::now).format("%H:%M:%S%.3f"));
-                        }
-                        
-                        if has_pressed && !has_held {
-                            // PRESSED-only button: Fire immediately
-                            println!("[{}] ⚡ Immediate PRESSED for {} (PRESSED-only button)", timestamp, button_name.as_str());
-                            tracker.action_fired = true;
-                            events.push(ButtonEvent {
-                                button_name,
-                                event_type: ButtonEventType::PRESSED,
-                            });
-                        }
-                        // For HELD-only and PRESSED+HELD buttons, wait for threshold timing
-                    },
-                    
-                    (ButtonState::EVALUATING, true) => {
-                        // Additional signal - user might be holding (rare with Elgato)
-                        tracker.signal_count += 1;
-                        tracker.last_signal_time = Some(now);
-                        
-                        let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                        println!("[{}] 🔄 Button {} additional signal #{} detected", 
-                                 timestamp, button_name.as_str(), tracker.signal_count);
-                        
-                        // If we get multiple signals on PRESSED+HELD button, fire HELD
-                        if tracker.signal_count >= 2 && !tracker.action_fired {
-                            let has_held = has_held_action(&button_name);
-                            let has_pressed = has_pressed_action(&button_name);
-                            if has_held && has_pressed {
-                                println!("[{}] 🔥 HELD event for {} (multiple signals on PRESSED+HELD button)", 
-                                         timestamp, button_name.as_str());
-                                tracker.action_fired = true;
-                                events.push(ButtonEvent {
-                                    button_name,
-                                    event_type: ButtonEventType::HELD,
-                                });
+        button_states
+    }
+
+    pub fn process_button_timeouts<F>(&mut self, now: Instant, mut event_handler: F) -> Result<(), Box<dyn std::error::Error>>
+    where
+        F: FnMut(ButtonEvent),
+    {
+        let mut buttons_to_process = vec![];
+        
+        // Collect buttons that need timeout processing
+        for (&button_name, state_machine) in &self.state_machines {
+            if state_machine.state() == ButtonState::EVALUATING {
+                buttons_to_process.push(button_name);
+            }
+        }
+        
+        // Process timeouts for evaluating buttons
+        for button_name in buttons_to_process {
+            let input = ButtonInput { button_name, is_pressed: false };
+            
+            if let Some(state_machine) = self.state_machines.get_mut(&button_name) {
+                match self.logic.process_input(state_machine, input, now) {
+                    StateTransition::Continue => {}
+                    StateTransition::EmitEvents(events) => {
+                        for event in events {
+                            if matches!(event.event_type, ButtonEventType::RELEASED) {
+                                state_machine.reset(self.logic.initial_state());
                             }
+                            event_handler(event);
                         }
-                    },
-                    
-                    (ButtonState::EVALUATING, false) => {
-                        // No HID signal, but still evaluating intent
-                        if let Some(first_signal) = tracker.first_signal_time {
-                            let time_since_first = now.duration_since(first_signal);
-                            let has_pressed = has_pressed_action(&button_name);
-                            let has_held = has_held_action(&button_name);
-                            let threshold_ms = get_hold_threshold(&button_name);
-                            
-                            // For PRESSED+HELD buttons: Only fire PRESSED if user releases very quickly (within 300ms)
-                            // This accounts for the fact that Elgato device stops sending HID signals after ~100ms
-                            // even when user is still physically holding the button
-                            let quick_release_threshold = 300; // ms - conservative threshold for actual quick releases
-                            if !tracker.action_fired && has_pressed && has_held && 
-                               (time_since_first.as_millis() as u64) < quick_release_threshold &&
-                               (time_since_first.as_millis() as u64) < threshold_ms {
-                                let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                                println!("[{}] ⚡ Quick release detected for {} ({}ms elapsed < {}ms quick-release threshold) - firing PRESSED", 
-                                         timestamp, button_name.as_str(), time_since_first.as_millis(), quick_release_threshold);
-                                tracker.action_fired = true;
-                                events.push(ButtonEvent {
-                                    button_name,
-                                    event_type: ButtonEventType::PRESSED,
-                                });
-                            }
-                            
-                            // Check if we've reached the hold threshold for HELD actions
-                            if !tracker.action_fired && has_held && time_since_first.as_millis() as u64 >= threshold_ms {
-                                let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                                println!("[{}] ⏰ Hold threshold reached for {} ({}ms elapsed >= {}ms threshold, action_fired={})", 
-                                         timestamp, button_name.as_str(), time_since_first.as_millis(), threshold_ms, tracker.action_fired);
-                                
-                                if has_held && !has_pressed {
-                                    // HELD-only button: Fire HELD after threshold
-                                    println!("[{}] 🔥 HELD event for {} (HELD-only button - threshold reached)", 
-                                             timestamp, button_name.as_str());
-                                } else if has_held && has_pressed {
-                                    // PRESSED+HELD button: Fire HELD after threshold
-                                    println!("[{}] 🔥 HELD event for {} (PRESSED+HELD button - threshold reached)", 
-                                             timestamp, button_name.as_str());
-                                }
-                                
-                                tracker.action_fired = true;
-                                events.push(ButtonEvent {
-                                    button_name,
-                                    event_type: ButtonEventType::HELD,
-                                });
-                            } else if has_held && time_since_first.as_millis() as u64 >= threshold_ms {
-                                // Threshold reached but action already fired - log this
-                                let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                                println!("[{}] ⚠️  Hold threshold reached for {} but action already fired (action_fired={})", 
-                                         timestamp, button_name.as_str(), tracker.action_fired);
-                            }
-                            
-                            // Determine the effective evaluation window - use the longer of evaluation_window or threshold
-                            let effective_window = if has_held { 
-                                std::cmp::max(self.evaluation_window_ms, threshold_ms + 100) // Add 100ms buffer after threshold
-                            } else {
-                                self.evaluation_window_ms
-                            };
-                            
-                            // If effective evaluation window has passed, make final decision
-                            if time_since_first.as_millis() as u64 >= effective_window {
-                                let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                                println!("[{}] 🔄 Button {} evaluation complete - signals: {}, window: {}ms (effective: {}ms)", 
-                                         timestamp, button_name.as_str(), tracker.signal_count, time_since_first.as_millis(), effective_window);
-                                
-                                // Only fire action if none fired yet (for PRESSED+HELD buttons)
-                                if !tracker.action_fired && has_pressed && has_held {
-                                    // PRESSED+HELD button with single signal = PRESSED
-                                    println!("[{}] 🔥 PRESSED event for {} (single signal on PRESSED+HELD button)", 
-                                             timestamp, button_name.as_str());
-                                    events.push(ButtonEvent {
-                                        button_name,
-                                        event_type: ButtonEventType::PRESSED,
-                                    });
-                                }
-                                
-                                // Reset state and fire RELEASED
-                                let timestamp_reset = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                                println!("[{}] 🔄 Resetting button {} state: EVALUATING->IDLE, clearing all tracking data", 
-                                         timestamp_reset, button_name.as_str());
-                                tracker.state = ButtonState::IDLE;
-                                tracker.first_signal_time = None;
-                                tracker.last_signal_time = None;
-                                tracker.signal_count = 0;
-                                tracker.action_fired = false;
-                                
-                                let timestamp_final = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                                println!("[{}] ⏹️  Hold threshold timer ended for {}", timestamp_final, button_name.as_str());
-                                
-                                events.push(ButtonEvent {
-                                    button_name,
-                                    event_type: ButtonEventType::RELEASED,
-                                });
-                            }
-                        }
-                    },
-                    
-                    (ButtonState::IDLE, false) => {
-                        // Button remains idle - no action needed
+                    }
+                    StateTransition::Reset => {
+                        state_machine.reset(self.logic.initial_state());
                     }
                 }
             }
         }
-
-        events
+        
+        Ok(())
     }
 }
+
+// Re-export the types that are still used by the action manager

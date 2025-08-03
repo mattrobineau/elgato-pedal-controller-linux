@@ -4,17 +4,17 @@ use enigo::Key;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PhysicalButtonName {
+    Button0,
     Button1,
     Button2,
-    Button3,
 }
 
 impl PhysicalButtonName {
     pub fn as_str(&self) -> &str {
         match self {
-            PhysicalButtonName::Button1 => "button_0",
-            PhysicalButtonName::Button2 => "button_1", 
-            PhysicalButtonName::Button3 => "button_2",
+            PhysicalButtonName::Button0 => "button_0",
+            PhysicalButtonName::Button1 => "button_1", 
+            PhysicalButtonName::Button2 => "button_2",
         }
     }
 }
@@ -174,7 +174,7 @@ impl TokenBasedParser {
             actions: button_0_actions,
         });
 
-        // button_1: Meta hold on HELD, ReleaseAll on RELEASED (matches your config exactly)
+        // button_1: Meta hold on HELD, ReleaseAll on RELEASING (matches your config exactly)
         let mut button_1_actions = HashMap::new();
         button_1_actions.insert("HELD".to_string(), vec![
             ActionItem {
@@ -184,7 +184,7 @@ impl TokenBasedParser {
                 auto_release: Some(false),
             }
         ]);
-        button_1_actions.insert("RELEASED".to_string(), vec![
+        button_1_actions.insert("RELEASING".to_string(), vec![
             ActionItem {
                 action_type: "ReleaseAll".to_string(),
                 direction: None,
@@ -361,5 +361,28 @@ impl TokenBasedParser {
             },
             _ => Err(format!("Unknown action type: {}", item.action_type).into()),
         }
+    }
+}
+
+impl Default for TokenBasedParser {
+    fn default() -> Self {
+        Self::new().unwrap_or_else(|_| {
+            let mut buttons = HashMap::new();
+            buttons.insert("button_0".to_string(), ButtonConfig { actions: HashMap::new() });
+            buttons.insert("button_1".to_string(), ButtonConfig { actions: HashMap::new() });
+            buttons.insert("button_2".to_string(), ButtonConfig { actions: HashMap::new() });
+            
+            TokenBasedParser {
+                config: TokenBasedConfig {
+                    device: DeviceConfig {
+                        button_count: 3,
+                        buttons,
+                        settings: Some(DeviceSettings {
+                            hold_threshold_time_ms: Some(666),
+                        }),
+                    },
+                },
+            }
+        })
     }
 }

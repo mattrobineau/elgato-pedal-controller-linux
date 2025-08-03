@@ -17,6 +17,9 @@ impl Default for AppConfig {
     }
 }
 
+mod button_state_machine;
+mod button_types;
+mod hold_intent_state_machine;
 mod hold_intent_parser;
 mod hold_intent_input_action_manager;
 mod input_simulator;
@@ -85,8 +88,8 @@ fn main() {
 
             loop {
                 let mut buf = [0u8; 8]; // Adjusted buffer size based on the message structure
-                match device.read_timeout(&mut buf, 100) {
-                    // 100ms timeout for responsive hold detection
+                match device.read_timeout(&mut buf, 200) {
+                    // 200ms timeout for responsive hold detection
                     Ok(len) if len > 0 => {
                         println!("📥 Received {} bytes from HID device: {:?}", len, &buf[..len]);
                         if let Err(e) = manager.process_hid_data(&buf) {
@@ -94,9 +97,13 @@ fn main() {
                         }
                     }
                     Ok(_) => {
-                        // Timeout reached, no new data - check for any pending hold events
-                        if let Err(e) = manager.process_hid_data(&[1, 0, 3, 0, 0, 0, 0, 0]) {
-                            eprintln!("Error checking timeouts: {}", e);
+                        // Timeout reached, no new data - process timers for scheduled releases and timeouts
+                        if let Err(e) = manager.process_timers() {
+                            eprintln!("Error processing timers: {}", e);
+                        }
+                        // Process any button timeouts (for evaluation windows, hold thresholds, etc.)
+                        if let Err(e) = manager.process_button_timeouts() {
+                            eprintln!("Error processing button timeouts: {}", e);
                         }
                     }
                     Err(err) => {

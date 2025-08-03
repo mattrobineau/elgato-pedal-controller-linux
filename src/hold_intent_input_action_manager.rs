@@ -1,6 +1,7 @@
 use std::time::Instant;
-use crate::hold_intent_parser::{HoldIntentParser, ButtonEvent, ButtonEventType};
-use crate::token_based_config::{TokenBasedParser, PhysicalButtonName};
+use crate::hold_intent_parser::HoldIntentParser;
+use crate::button_types::{ButtonEvent, ButtonEventType};
+use crate::token_based_config::TokenBasedParser;
 use crate::input_simulator::InputSimulator;
 
 pub struct HoldIntentInputActionManager {
@@ -11,11 +12,11 @@ pub struct HoldIntentInputActionManager {
 
 impl HoldIntentInputActionManager {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let parser = HoldIntentParser::new();
-        let config = TokenBasedParser::new()?;
-        let input_simulator = InputSimulator::new()?;
+        let parser = HoldIntentParser::new().expect("Failed to create HoldIntentParser");
+        let config = TokenBasedParser::new().expect("Failed to create TokenBasedParser");
+        let input_simulator = InputSimulator::new().expect("Failed to create InputSimulator");
         
-        Ok(Self {
+        Ok(HoldIntentInputActionManager {
             parser,
             config,
             input_simulator,
@@ -25,18 +26,46 @@ impl HoldIntentInputActionManager {
     pub fn process_hid_data(&mut self, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
         
-        // Get button events from parser
-        let events = self.parser.parse_hid_data(
-            data,
-            now,
-            |button: &PhysicalButtonName| self.config.button_has_held_action(*button),
-            |button: &PhysicalButtonName| self.config.button_has_pressed_action(*button),
-            |button: &PhysicalButtonName| self.config.get_hold_threshold_ms_for_button(*button),
-        );
+        // Collect events first to avoid borrowing issues
+        let mut events = Vec::new();
+        self.parser.parse_hid_data(data, now, |event| {
+            events.push(event);
+        })?;
 
-        // Process each event
+        // Then process the collected events
         for event in events {
-            self.handle_button_event(event)?;
+            if let Err(e) = self.handle_button_event(event) {
+                eprintln!("Error handling button event: {}", e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Process any pending timer-based events (scheduled releases, timeouts, etc.)
+    /// This should be called regularly even when no HID data is received
+    pub fn process_timers(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Process scheduled key releases
+        self.input_simulator.process_scheduled_releases()?;
+        Ok(())
+    }
+
+    /// Process button timeout events (evaluation windows, hold thresholds, etc.)
+    /// This should be called regularly to handle state machine timeouts
+    pub fn process_button_timeouts(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let now = std::time::Instant::now();
+        
+        // Collect events first to avoid borrowing issues
+        let mut events = Vec::new();
+        self.parser.process_button_timeouts(now, |event| {
+            events.push(event);
+        })?;
+
+        // Then process the collected events
+        for event in events {
+            if let Err(e) = self.handle_button_event(event) {
+                eprintln!("Error handling timeout event: {}", e);
+            }
         }
 
         Ok(())
@@ -53,17 +82,27 @@ impl HoldIntentInputActionManager {
             ButtonEventType::HELD => {
                 self.config.get_actions_for_button_event(event.button_name, "HELD")
             },
+            ButtonEventType::RELEASING => {
+                println!("🔍 Looking for RELEASING actions for {}", event.button_name.as_str());
+                let releasing_actions = self.config.get_actions_for_button_event(event.button_name, "RELEASING");
+                if releasing_actions.is_some() {
+                    println!("✅ Found RELEASING actions!");
+                } else {
+                    println!("❌ No RELEASING actions found");
+                }
+                releasing_actions
+            },
             ButtonEventType::RELEASED => {
                 self.config.get_actions_for_button_event(event.button_name, "RELEASED")
-            },
+            }
         };
 
         if let Some(actions) = actions {
-            println!("Button {} event: {}", event.button_name.as_str(), event.event_type.as_str());
-            println!("Executing {} actions", actions.len());
+            println!(" 🅾️ Button {} event: {}", event.button_name.as_str(), event.event_type.as_str());
+            println!("> Executing {} actions", actions.len());
             
             for (i, action) in actions.iter().enumerate() {
-                println!("Executing action {}: {:?}", i + 1, action);
+                println!(" 🥮 Executing action {}: {:?}", i + 1, action);
             }
             
             match self.input_simulator.execute_actions(&actions) {
