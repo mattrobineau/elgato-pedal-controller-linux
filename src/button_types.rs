@@ -2,6 +2,7 @@ use crate::token_based_config::PhysicalButtonName;
 
 /// Generic button states that can be used by any button detection system
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum ButtonState {
     IDLE,       // No recent activity
     EVALUATING, // Received first signal, evaluating user intent
@@ -11,11 +12,11 @@ pub enum ButtonState {
 
 /// Types of button events that can be generated
 #[derive(Debug, Copy, Clone)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum ButtonEventType {
     PRESSED,
     HELD,
-    RELEASING,  // Button is being released (transition event)
-    RELEASED,   // Button has been fully released (final state)
+    RELEASING, // Button is being released (transition event)
 }
 
 impl ButtonEventType {
@@ -24,7 +25,6 @@ impl ButtonEventType {
             ButtonEventType::PRESSED => "PRESSED",
             ButtonEventType::HELD => "HELD",
             ButtonEventType::RELEASING => "RELEASING",
-            ButtonEventType::RELEASED => "RELEASED",
         }
     }
 }

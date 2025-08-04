@@ -10,8 +10,8 @@ pub struct ButtonStateMachine<S> {
     action_fired: bool,
 }
 
-impl<S> ButtonStateMachine<S> 
-where 
+impl<S> ButtonStateMachine<S>
+where
     S: Clone + Copy + PartialEq,
 {
     pub fn new(initial_state: S) -> Self {
@@ -47,7 +47,8 @@ where
 
     /// Get the time elapsed since the first signal
     pub fn time_since_first_signal(&self, now: Instant) -> Option<std::time::Duration> {
-        self.first_signal_time.map(|first| now.duration_since(first))
+        self.first_signal_time
+            .map(|first| now.duration_since(first))
     }
 
     /// Get the number of signals recorded
@@ -89,8 +90,13 @@ pub enum StateTransition<E> {
 /// Trait for defining state machine behavior
 pub trait StateMachineLogic<S, E, Input> {
     /// Process input and return transition result
-    fn process_input(&self, state_machine: &mut ButtonStateMachine<S>, input: Input, now: Instant) -> StateTransition<E>;
-    
+    fn process_input(
+        &self,
+        state_machine: &mut ButtonStateMachine<S>,
+        input: Input,
+        now: Instant,
+    ) -> StateTransition<E>;
+
     /// Get the initial state
     fn initial_state(&self) -> S;
 }

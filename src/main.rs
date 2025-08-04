@@ -1,11 +1,12 @@
-use hidapi::HidApi;
 use crate::hold_intent_input_action_manager::HoldIntentInputActionManager;
+use hidapi::HidApi;
 
 /// Configuration for the application
 #[derive(Debug)]
 pub struct AppConfig {
     pub button_count: usize,
     pub companion_signature: String,
+    pub default_hold_threshold_ms: u64,
 }
 
 impl Default for AppConfig {
@@ -13,18 +14,19 @@ impl Default for AppConfig {
         Self {
             button_count: 3, // Default Elgato Stream Deck Pedal has 3 buttons
             companion_signature: "--x-elgato-pedal-companion-notification".to_string(),
+            default_hold_threshold_ms: 666, // Default 1 second hold threshold
         }
     }
 }
 
+mod button_state_machine;
+mod button_types;
+mod config_manager;
+mod hold_intent_input_action_manager;
+mod hold_intent_parser;
+mod hold_intent_state_machine;
 mod input_simulator;
 mod token_based_config;
-mod button_types;
-mod button_state_machine;
-mod hold_intent_state_machine;
-mod hold_intent_parser;
-mod hold_intent_input_action_manager;
-mod config_manager;
 
 fn main() {
     let app_config = AppConfig::default();
@@ -34,10 +36,11 @@ fn main() {
         app_config.button_count
     );
 
-    let mut manager = match HoldIntentInputActionManager::new() {
+    let mut manager = match HoldIntentInputActionManager::new(app_config.default_hold_threshold_ms)
+    {
         Ok(mgr) => mgr,
         Err(e) => {
-            eprintln!("Failed to create input action manager: {}", e);
+            eprintln!("Failed to create input action manager: {e}");
             return;
         }
     };
@@ -80,7 +83,9 @@ fn main() {
                 Ok(device) => device,
                 Err(error) => {
                     eprintln!("❌ Failed to open the target device: {error}");
-                    eprintln!("💡 Make sure you have the correct permissions (try adding your user to the 'input' group)");
+                    eprintln!(
+                        "💡 Make sure you have the correct permissions (try adding your user to the 'input' group)"
+                    );
                     return;
                 }
             };
@@ -92,19 +97,23 @@ fn main() {
                 match device.read_timeout(&mut buf, 142) {
                     // 200ms timeout for responsive hold detection
                     Ok(len) if len > 0 => {
-                        println!("📥 Received {} bytes from HID device: {:?}", len, &buf[..len]);
+                        println!(
+                            "📥 Received {} bytes from HID device: {:?}",
+                            len,
+                            &buf[..len]
+                        );
                         if let Err(e) = manager.process_hid_data(&buf) {
-                            eprintln!("Error handling data: {}", e);
+                            eprintln!("Error handling data: {e}");
                         }
                     }
                     Ok(_) => {
                         // Timeout reached, no new data - process timers for scheduled releases and timeouts
                         if let Err(e) = manager.process_timers() {
-                            eprintln!("Error processing timers: {}", e);
+                            eprintln!("Error processing timers: {e}");
                         }
                         // Process any button timeouts (for evaluation windows, hold thresholds, etc.)
                         if let Err(e) = manager.process_button_timeouts() {
-                            eprintln!("Error processing button timeouts: {}", e);
+                            eprintln!("Error processing button timeouts: {e}");
                         }
                     }
                     Err(err) => {
