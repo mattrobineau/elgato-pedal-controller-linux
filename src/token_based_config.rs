@@ -54,6 +54,8 @@ pub struct ActionItem {
 #[serde(untagged)]
 pub enum ActionValue {
     Key(Key),        // Try Key first - Enigo can deserialize "MicMute", "Meta", etc.
+    Unicode(char),   // Handle {"Unicode": "f"} pattern
+    Other(u32),      // Handle {"Other": 13} pattern
     Number(u64),     // Then try Number for durations, etc.
     Text(String),    // Finally try Text as fallback for actual text input
 }
@@ -95,10 +97,7 @@ impl TokenBasedParser {
             // Check if the file is empty or contains only whitespace
             if config_content.trim().is_empty() {
                 println!("Config file exists but is empty, creating default config...");
-                let default_config = Self::create_default_config();
-                Self::save_config(&default_config)?;
-                println!("Created default config file at: \"{}\"", config_path.display());
-                return Ok(default_config);
+                return Self::create_and_save_default_config();
             }
             
             // Try to parse the JSON, if it fails, create a default config
@@ -110,19 +109,21 @@ impl TokenBasedParser {
                 Err(e) => {
                     eprintln!("Failed to parse config file: {}", e);
                     println!("Creating default config...");
-                    let default_config = Self::create_default_config();
-                    Self::save_config(&default_config)?;
-                    println!("Created default config file at: \"{}\"", config_path.display());
-                    Ok(default_config)
+                    Self::create_and_save_default_config()
                 }
             }
         } else {
             // Create default config and save it
-            let default_config = Self::create_default_config();
-            Self::save_config(&default_config)?;
-            println!("Created default config file at: \"{}\"", config_path.display());
-            Ok(default_config)
+            Self::create_and_save_default_config()
         }
+    }
+
+    fn create_and_save_default_config() -> Result<TokenBasedConfig, Box<dyn std::error::Error>> {
+        let default_config = Self::create_default_config();
+        Self::save_config(&default_config)?;
+        let config_path = Self::get_config_path();
+        println!("Created default config file at: \"{}\"", config_path.display());
+        Ok(default_config)
     }
 
     pub fn save_config(config: &TokenBasedConfig) -> Result<(), Box<dyn std::error::Error>> {
@@ -231,44 +232,6 @@ impl TokenBasedParser {
         }
     }
 
-    pub fn get_hold_threshold_ms(&self) -> u64 {
-        self.config.device.settings
-            .as_ref()
-            .and_then(|settings| settings.hold_threshold_time_ms)
-            .unwrap_or(1000) // Default to 1000ms
-    }
-
-    pub fn get_hold_threshold_ms_for_button(&self, button_name: PhysicalButtonName) -> u64 {
-        let button_key = button_name.as_str();
-        
-        // For now, use different thresholds based on button configuration
-        // This could be made configurable in the future
-        match button_key {
-            "button_1" => 1000, // Middle pedal - 1 second for HELD  
-            "button_2" => 1000, // Right pedal - 1 second for HELD vs PRESSED  
-            "button_0" => 1000, // Left pedal - 1 second (PRESSED only)
-            _ => self.get_hold_threshold_ms(), // Fall back to global threshold
-        }
-    }
-
-    pub fn button_has_held_action(&self, button_name: PhysicalButtonName) -> bool {
-        let button_key = button_name.as_str();
-        if let Some(button_config) = self.config.device.buttons.get(button_key) {
-            button_config.actions.contains_key("HELD")
-        } else {
-            false
-        }
-    }
-
-    pub fn button_has_pressed_action(&self, button_name: PhysicalButtonName) -> bool {
-        let button_key = button_name.as_str();
-        if let Some(button_config) = self.config.device.buttons.get(button_key) {
-            button_config.actions.contains_key("PRESSED")
-        } else {
-            false
-        }
-    }
-
     pub fn get_actions_for_button_event(&self, button_name: PhysicalButtonName, event_type: &str) -> Option<Vec<ExecutableAction>> {
         let button_key = button_name.as_str();
         let button_config = self.config.device.buttons.get(button_key)?;
@@ -294,8 +257,16 @@ impl TokenBasedParser {
                 
                 let enigo_key = match &item.value {
                     Some(ActionValue::Key(key)) => key.clone(),
+                    Some(ActionValue::Other(code)) => {
+                        // Handle Key::Other for platform-specific key codes
+                        println!("===========================================================");
+                        println!("Key::Other is used for platform-specific key codes, ensure you handle this correctly!");
+                        println!("                        {}", code);
+                        println!("===========================================================");
+                        Key::Other(*code as u32)
+                    },
                     _ => {
-                        return Err("Key action requires a Key value. Use 'Text' action type for text input.".into());
+                        return Err("Key action requires a Key value or numeric key code. Use 'Text' action type for text input.".into());
                     }
                 };
                 
@@ -310,6 +281,7 @@ impl TokenBasedParser {
                 let auto_release = item.auto_release.unwrap_or(true);
                 
                 let unicode_char = match &item.value {
+                    Some(ActionValue::Unicode(ch)) => *ch,
                     Some(ActionValue::Text(text)) => {
                         if text.chars().count() == 1 {
                             text.chars().next().unwrap()
@@ -318,7 +290,7 @@ impl TokenBasedParser {
                         }
                     },
                     _ => {
-                        return Err("Unicode action requires a single character string".into());
+                        return Err("Unicode action requires a single character".into());
                     }
                 };
                 
@@ -364,25 +336,4 @@ impl TokenBasedParser {
     }
 }
 
-impl Default for TokenBasedParser {
-    fn default() -> Self {
-        Self::new().unwrap_or_else(|_| {
-            let mut buttons = HashMap::new();
-            buttons.insert("button_0".to_string(), ButtonConfig { actions: HashMap::new() });
-            buttons.insert("button_1".to_string(), ButtonConfig { actions: HashMap::new() });
-            buttons.insert("button_2".to_string(), ButtonConfig { actions: HashMap::new() });
-            
-            TokenBasedParser {
-                config: TokenBasedConfig {
-                    device: DeviceConfig {
-                        button_count: 3,
-                        buttons,
-                        settings: Some(DeviceSettings {
-                            hold_threshold_time_ms: Some(666),
-                        }),
-                    },
-                },
-            }
-        })
-    }
-}
+

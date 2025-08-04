@@ -1,19 +1,22 @@
 use std::time::Instant;
+use std::sync::{Arc, Mutex};
 use crate::hold_intent_parser::HoldIntentParser;
 use crate::button_types::{ButtonEvent, ButtonEventType};
 use crate::token_based_config::TokenBasedParser;
 use crate::input_simulator::InputSimulator;
+use crate::config_manager::ConfigManager;
 
 pub struct HoldIntentInputActionManager {
     parser: HoldIntentParser,
-    config: TokenBasedParser,
+    config: Arc<Mutex<TokenBasedParser>>,
     input_simulator: InputSimulator,
 }
 
 impl HoldIntentInputActionManager {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         let parser = HoldIntentParser::new().expect("Failed to create HoldIntentParser");
-        let config = TokenBasedParser::new().expect("Failed to create TokenBasedParser");
+        let config_manager = ConfigManager::global();
+        let config = config_manager.get_parser();
         let input_simulator = InputSimulator::new().expect("Failed to create InputSimulator");
         
         Ok(HoldIntentInputActionManager {
@@ -75,16 +78,17 @@ impl HoldIntentInputActionManager {
         println!("🚀 Button {} event: {} -> executing actions", 
                  event.button_name.as_str(), event.event_type.as_str());
 
+        let config = self.config.lock().unwrap();
         let actions = match event.event_type {
             ButtonEventType::PRESSED => {
-                self.config.get_actions_for_button_event(event.button_name, "PRESSED")
+                config.get_actions_for_button_event(event.button_name, "PRESSED")
             },
             ButtonEventType::HELD => {
-                self.config.get_actions_for_button_event(event.button_name, "HELD")
+                config.get_actions_for_button_event(event.button_name, "HELD")
             },
             ButtonEventType::RELEASING => {
                 println!("🔍 Looking for RELEASING actions for {}", event.button_name.as_str());
-                let releasing_actions = self.config.get_actions_for_button_event(event.button_name, "RELEASING");
+                let releasing_actions = config.get_actions_for_button_event(event.button_name, "RELEASING");
                 if releasing_actions.is_some() {
                     println!("✅ Found RELEASING actions!");
                 } else {
@@ -93,9 +97,10 @@ impl HoldIntentInputActionManager {
                 releasing_actions
             },
             ButtonEventType::RELEASED => {
-                self.config.get_actions_for_button_event(event.button_name, "RELEASED")
+                config.get_actions_for_button_event(event.button_name, "RELEASED")
             }
         };
+        drop(config); // Release the lock early
 
         if let Some(actions) = actions {
             println!(" 🅾️ Button {} event: {}", event.button_name.as_str(), event.event_type.as_str());

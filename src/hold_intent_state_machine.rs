@@ -1,4 +1,5 @@
 use std::time::Instant;
+use std::sync::{Arc, Mutex};
 use crate::button_state_machine::{ButtonStateMachine, StateMachineLogic, StateTransition};
 use crate::button_types::{ButtonState, ButtonEventType, ButtonEvent, ButtonInput};
 use crate::token_based_config::{PhysicalButtonName, TokenBasedParser};
@@ -15,11 +16,11 @@ pub struct ButtonConfig {
 pub struct HoldIntentLogic {
     evaluation_window_ms: u64,
     quick_release_threshold_ms: u64,
-    config_parser: TokenBasedParser,
+    config_parser: Arc<Mutex<TokenBasedParser>>,
 }
 
 impl HoldIntentLogic {
-    pub fn new(evaluation_window_ms: u64, quick_release_threshold_ms: u64, config_parser: TokenBasedParser) -> Self {
+    pub fn new(evaluation_window_ms: u64, quick_release_threshold_ms: u64, config_parser: Arc<Mutex<TokenBasedParser>>) -> Self {
         Self {
             evaluation_window_ms,
             quick_release_threshold_ms,
@@ -27,10 +28,11 @@ impl HoldIntentLogic {
         }
     }
 
-    fn get_button_config(&self, button_name: &PhysicalButtonName) -> ButtonConfig {
+    pub fn get_button_config(&self, button_name: &PhysicalButtonName) -> ButtonConfig {
         // Use the cached config parser instead of creating a new one each time
-        let has_pressed_action = self.config_parser.get_actions_for_button_event(*button_name, "PRESSED").is_some();
-        let has_held_action = self.config_parser.get_actions_for_button_event(*button_name, "HELD").is_some();
+        let config_parser = self.config_parser.lock().unwrap();
+        let has_pressed_action = config_parser.get_actions_for_button_event(*button_name, "PRESSED").is_some();
+        let has_held_action = config_parser.get_actions_for_button_event(*button_name, "HELD").is_some();
         let threshold_ms = 1000; // Default 1 second threshold
         
         ButtonConfig {
@@ -109,98 +111,6 @@ impl HoldIntentLogic {
         StateTransition::Continue
     }
 
-    fn handle_evaluating_without_signal(
-        &self,
-        state_machine: &mut ButtonStateMachine<ButtonState>,
-        input: &ButtonInput,
-        config: &ButtonConfig,
-        now: Instant,
-    ) -> StateTransition<ButtonEvent> {
-        if let Some(time_since_first) = state_machine.time_since_first_signal(now) {
-            // Check for quick release on PRESSED+HELD buttons
-            if !state_machine.action_fired() && config.has_pressed_action && config.has_held_action && 
-               (time_since_first.as_millis() as u64) < self.quick_release_threshold_ms &&
-               (time_since_first.as_millis() as u64) < config.threshold_ms {
-                let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                println!("[{}] ⚡ Quick release detected for {} ({}ms elapsed < {}ms quick-release threshold) - firing PRESSED", 
-                         timestamp, input.button_name.as_str(), time_since_first.as_millis(), self.quick_release_threshold_ms);
-                state_machine.mark_action_fired();
-                return StateTransition::EmitEvents(vec![ButtonEvent {
-                    button_name: input.button_name,
-                    event_type: ButtonEventType::PRESSED,
-                }]);
-            }
-            
-            // Check for hold threshold - fire action but don't change state here
-            if !state_machine.action_fired() && config.has_held_action && 
-               (time_since_first.as_millis() as u64) >= config.threshold_ms {
-                let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                println!("[{}] ⏰ Hold threshold reached for {} ({}ms elapsed >= {}ms threshold, action_fired={})", 
-                         timestamp, input.button_name.as_str(), time_since_first.as_millis(), config.threshold_ms, state_machine.action_fired());
-                
-                if config.has_held_action && !config.has_pressed_action {
-                    // HELD-only button: Fire HELD after threshold
-                    println!("[{}] 🔥 HELD action for {} (HELD-only button - threshold reached)", 
-                             timestamp, input.button_name.as_str());
-                } else if config.has_held_action && config.has_pressed_action {
-                    // PRESSED+HELD button: Fire HELD after threshold
-                    println!("[{}] 🔥 HELD action for {} (PRESSED+HELD button - threshold reached)", 
-                             timestamp, input.button_name.as_str());
-                }
-                
-                // Mark that we've fired the action, but DON'T change state
-                // State transitions should be driven by actual button release (HID data)
-                state_machine.mark_action_fired();
-                return StateTransition::EmitEvents(vec![ButtonEvent {
-                    button_name: input.button_name,
-                    event_type: ButtonEventType::HELD,
-                }]);
-            }
-            
-            // Check if evaluation window has expired
-            let effective_window = std::cmp::max(self.evaluation_window_ms, config.threshold_ms + 100);
-            if (time_since_first.as_millis() as u64) >= effective_window {
-                let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                
-                println!("[{}] 🔄 Button {} evaluation complete - signals: {}, window: {}ms (effective: {}ms)", 
-                         timestamp, input.button_name.as_str(), state_machine.signal_count(), 
-                         time_since_first.as_millis(), effective_window);
-                
-                if state_machine.action_fired() {
-                    // Action was already fired - check if we should transition to HELD state
-                    if (time_since_first.as_millis() as u64) >= config.threshold_ms {
-                        let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                        println!("[{}] 🔄 Transitioning to HELD state for {} (action fired, threshold passed)", 
-                                 timestamp, input.button_name.as_str());
-                        state_machine.transition_to(ButtonState::HELD);
-                        return StateTransition::Continue;
-                    } else {
-                        println!("[{}] ⚠️  Action already fired for {} - evaluation window expired but button still held", 
-                                 timestamp, input.button_name.as_str());
-                        println!("[{}] 🔄 Staying in current state - no RELEASING event needed", 
-                                 timestamp);
-                        return StateTransition::Continue;
-                    }
-                } else {
-                    // No action was fired during evaluation - this means button was released quickly
-                    println!("[{}] 🔄 No action fired for {} - treating as quick release", 
-                             timestamp, input.button_name.as_str());
-                    println!("[{}] 🔄 Resetting button {} state: EVALUATING->IDLE", 
-                             timestamp, input.button_name.as_str());
-                    println!("[{}] ⏹️  Hold threshold timer ended for {}", timestamp, input.button_name.as_str());
-                    
-                    let events = vec![ButtonEvent {
-                        button_name: input.button_name,
-                        event_type: ButtonEventType::RELEASING,
-                    }];
-                    
-                    return StateTransition::EmitEvents(events);
-                }
-            }
-        }
-        
-        StateTransition::Continue
-    }
 }
 
 impl StateMachineLogic<ButtonState, ButtonEvent, ButtonInput> for HoldIntentLogic {
@@ -230,18 +140,117 @@ impl StateMachineLogic<ButtonState, ButtonEvent, ButtonInput> for HoldIntentLogi
                 self.handle_evaluating_with_signal(state_machine, &input, &config, now)
             }
             (ButtonState::EVALUATING, false) => {
-                self.handle_evaluating_without_signal(state_machine, &input, &config, now)
+                // CRITICAL: Physical button release during EVALUATING - cancel hold threshold timer!
+                let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
+                
+                if let Some(time_since_first) = state_machine.time_since_first_signal(now) {
+                    let time_elapsed_ms = time_since_first.as_millis() as u64;
+                    
+                    println!("[{}] 🛑 Physical button release detected during EVALUATING for {} ({}ms elapsed < {}ms threshold)", 
+                             timestamp, input.button_name.as_str(), time_elapsed_ms, config.threshold_ms);
+                    println!("[{}] ❌ Cancelling hold threshold timer - HELD state now impossible", 
+                             timestamp);
+                    
+                    // Handle different button configurations for early release
+                    let mut events_to_emit = vec![];
+                    
+                    if config.has_pressed_action && config.has_held_action {
+                        // PRESSED+HELD button: Check for quick release
+                        if time_elapsed_ms < self.quick_release_threshold_ms && !state_machine.action_fired() {
+                            println!("[{}] ⚡ Quick release detected for {} ({}ms elapsed < {}ms quick-release threshold) - firing PRESSED", 
+                                     timestamp, input.button_name.as_str(), time_elapsed_ms, self.quick_release_threshold_ms);
+                            state_machine.mark_action_fired();
+                            events_to_emit.push(ButtonEvent {
+                                button_name: input.button_name,
+                                event_type: ButtonEventType::PRESSED,
+                            });
+                        } else if !state_machine.action_fired() {
+                            // Released too late for PRESSED, too early for HELD - no action
+                            println!("[{}] 🔄 Button {} released too late for PRESSED ({}ms > {}ms), too early for HELD ({}ms < {}ms) - no action fired", 
+                                     timestamp, input.button_name.as_str(), time_elapsed_ms, self.quick_release_threshold_ms, time_elapsed_ms, config.threshold_ms);
+                        }
+                    } else if config.has_held_action && !config.has_pressed_action {
+                        // HELD-only button: No action since threshold wasn't reached
+                        if !state_machine.action_fired() {
+                            println!("[{}] 🔄 HELD-only button {} released before threshold ({}ms < {}ms) - no action fired", 
+                                     timestamp, input.button_name.as_str(), time_elapsed_ms, config.threshold_ms);
+                        }
+                    } else if config.has_pressed_action && !config.has_held_action {
+                        // PRESSED-only button: Should have fired immediately on press, but handle edge case
+                        if !state_machine.action_fired() {
+                            println!("[{}] ⚡ Late PRESSED action for {} (PRESSED-only button released)", 
+                                     timestamp, input.button_name.as_str());
+                            state_machine.mark_action_fired();
+                            events_to_emit.push(ButtonEvent {
+                                button_name: input.button_name,
+                                event_type: ButtonEventType::PRESSED,
+                            });
+                        }
+                    }
+                    
+                    // Check if we should transition to RELEASING state
+                    let config_parser = self.config_parser.lock().unwrap();
+                    let has_releasing_action = config_parser.get_actions_for_button_event(input.button_name, "RELEASING").is_some();
+                    drop(config_parser);
+                    
+                    if (state_machine.action_fired() || has_releasing_action) && has_releasing_action {
+                        // Transition to RELEASING state to allow RELEASING event to fire
+                        println!("[{}] 🔄 Transitioning {} to RELEASING state (action was fired: {}, RELEASING configured: {})", 
+                                 timestamp, input.button_name.as_str(), state_machine.action_fired(), has_releasing_action);
+                        state_machine.transition_to(ButtonState::RELEASING);
+                        
+                        if !events_to_emit.is_empty() {
+                            // Emit both PRESSED and RELEASING in sequence
+                            events_to_emit.push(ButtonEvent {
+                                button_name: input.button_name,
+                                event_type: ButtonEventType::RELEASING,
+                            });
+                            return StateTransition::EmitEvents(events_to_emit);
+                        } else {
+                            // Only RELEASING event
+                            return StateTransition::EmitEvents(vec![ButtonEvent {
+                                button_name: input.button_name,
+                                event_type: ButtonEventType::RELEASING,
+                            }]);
+                        }
+                    } else {
+                        // No RELEASING action, go directly to IDLE
+                        state_machine.reset(ButtonState::IDLE);
+                        
+                        if !events_to_emit.is_empty() {
+                            return StateTransition::EmitEvents(events_to_emit);
+                        }
+                    }
+                }
+                
+                // Always reset to IDLE when physically released during EVALUATING
+                println!("[{}] 🔄 Resetting button {} state: EVALUATING->IDLE (physical release, timer cancelled)", 
+                         timestamp, input.button_name.as_str());
+                state_machine.reset(ButtonState::IDLE);
+                StateTransition::Continue
             }
             (ButtonState::HELD, false) => {
-                // Button was released from HELD state - transition to RELEASING
+                // Button was released from HELD state - check if RELEASING is configured
                 let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                println!("[{}] 🔄 Button {} released from HELD state - transitioning to RELEASING", 
-                         timestamp, input.button_name.as_str());
-                state_machine.transition_to(ButtonState::RELEASING);
-                StateTransition::EmitEvents(vec![ButtonEvent {
-                    button_name: input.button_name,
-                    event_type: ButtonEventType::RELEASING,
-                }])
+                
+                let config_parser = self.config_parser.lock().unwrap();
+                let has_releasing_action = config_parser.get_actions_for_button_event(input.button_name, "RELEASING").is_some();
+                drop(config_parser);
+                
+                if has_releasing_action {
+                    println!("[{}] 🔄 Button {} released from HELD state - transitioning to RELEASING", 
+                             timestamp, input.button_name.as_str());
+                    state_machine.transition_to(ButtonState::RELEASING);
+                    StateTransition::EmitEvents(vec![ButtonEvent {
+                        button_name: input.button_name,
+                        event_type: ButtonEventType::RELEASING,
+                    }])
+                } else {
+                    println!("[{}] 🔄 Button {} released from HELD state - no RELEASING action, going to IDLE", 
+                             timestamp, input.button_name.as_str());
+                    state_machine.reset(ButtonState::IDLE);
+                    StateTransition::Continue
+                }
             }
             (ButtonState::RELEASING, false) => {
                 // Button continues to be released - transition to IDLE (fully released)
@@ -249,10 +258,7 @@ impl StateMachineLogic<ButtonState, ButtonEvent, ButtonInput> for HoldIntentLogi
                 println!("[{}] 🔄 Button {} fully released - transitioning to IDLE", 
                          timestamp, input.button_name.as_str());
                 state_machine.reset(ButtonState::IDLE);
-                StateTransition::EmitEvents(vec![ButtonEvent {
-                    button_name: input.button_name,
-                    event_type: ButtonEventType::RELEASED,
-                }])
+                StateTransition::Continue
             }
             (ButtonState::RELEASING, true) => {
                 // Button was pressed again during release - go back to EVALUATING

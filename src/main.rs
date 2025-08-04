@@ -17,13 +17,14 @@ impl Default for AppConfig {
     }
 }
 
-mod button_state_machine;
+mod input_simulator;
+mod token_based_config;
 mod button_types;
+mod button_state_machine;
 mod hold_intent_state_machine;
 mod hold_intent_parser;
 mod hold_intent_input_action_manager;
-mod input_simulator;
-mod token_based_config;
+mod config_manager;
 
 fn main() {
     let app_config = AppConfig::default();
@@ -88,7 +89,7 @@ fn main() {
 
             loop {
                 let mut buf = [0u8; 8]; // Adjusted buffer size based on the message structure
-                match device.read_timeout(&mut buf, 200) {
+                match device.read_timeout(&mut buf, 142) {
                     // 200ms timeout for responsive hold detection
                     Ok(len) if len > 0 => {
                         println!("📥 Received {} bytes from HID device: {:?}", len, &buf[..len]);
