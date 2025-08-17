@@ -32,25 +32,37 @@ impl HoldIntentLogic {
     /// Calculate the quick release threshold as 60% of the button's hold threshold (minimum 200ms)
     fn get_quick_release_threshold_ms(&self, button_name: &PhysicalButtonName) -> u64 {
         let hold_threshold = {
-            let config_parser = self.config_parser.lock().unwrap();
+            let config_parser = match self.config_parser.lock() {
+                Ok(parser) => parser,
+                Err(_) => return 200, // Default fallback
+            };
             config_parser.get_hold_threshold_ms(*button_name, self.global_default_threshold_ms)
         };
-        let calculated = (hold_threshold * 60) / 100; // 60% of hold threshold
-        calculated.max(200) // Minimum 200ms for reliable human button presses
+        let calculated = (hold_threshold * 60) / 100;
+        calculated.max(200)
     }
 
     /// Calculate the evaluation window as 120% of the button's hold threshold
     fn get_evaluation_window_ms(&self, button_name: &PhysicalButtonName) -> u64 {
         let hold_threshold = {
-            let config_parser = self.config_parser.lock().unwrap();
+            let config_parser = match self.config_parser.lock() {
+                Ok(parser) => parser,
+                Err(_) => return 1200, // Default fallback (120% of 1000ms)
+            };
             config_parser.get_hold_threshold_ms(*button_name, self.global_default_threshold_ms)
         };
-        (hold_threshold * 120) / 100 // Sort of a magic number: 120% of hold threshold for safety margin
+        (hold_threshold * 120) / 100
     }
 
     pub fn get_button_config(&self, button_name: &PhysicalButtonName) -> ButtonConfig {
-        // Use the cached config parser instead of creating a new one each time
-        let config_parser = self.config_parser.lock().unwrap();
+        let config_parser = match self.config_parser.lock() {
+            Ok(parser) => parser,
+            Err(_) => return ButtonConfig {
+                has_pressed_action: false,
+                has_held_action: false,
+                threshold_ms: self.global_default_threshold_ms,
+            },
+        };
         let has_pressed_action = config_parser
             .get_actions_for_button_event(*button_name, "PRESSED")
             .is_some();
@@ -180,16 +192,16 @@ impl StateMachineLogic<ButtonState, ButtonEvent, ButtonInput> for HoldIntentLogi
             }
             (ButtonState::EVALUATING, true) => {
                 // Check if we should transition to HELD state based on timing
-                if let Some(time_since_first) = state_machine.time_since_first_signal(now) {
-                    if (time_since_first.as_millis() as u64) >= config.threshold_ms {
-                        let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
-                        println!(
-                            "[{}] 🔄 Transitioning to HELD state for {} (threshold reached, button still pressed)",
-                            timestamp,
-                            input.button_name.as_str()
-                        );
-                        state_machine.transition_to(ButtonState::HELD);
-                    }
+                if let Some(time_since_first) = state_machine.time_since_first_signal(now)
+                    && (time_since_first.as_millis() as u64) >= config.threshold_ms
+                {
+                    let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
+                    println!(
+                        "[{}] 🔄 Transitioning to HELD state for {} (threshold reached, button still pressed)",
+                        timestamp,
+                        input.button_name.as_str()
+                    );
+                    state_machine.transition_to(ButtonState::HELD);
                 }
 
                 self.handle_evaluating_with_signal(state_machine, &input, &config, now)
@@ -273,12 +285,24 @@ impl StateMachineLogic<ButtonState, ButtonEvent, ButtonInput> for HoldIntentLogi
                         }
                     }
 
-                    // Check if we should transition to RELEASING state
-                    let config_parser = self.config_parser.lock().unwrap();
-                    let has_releasing_action = config_parser
-                        .get_actions_for_button_event(input.button_name, "RELEASING")
-                        .is_some();
-                    drop(config_parser);
+                    let has_releasing_action = {
+                        let config_parser = match self.config_parser.lock() {
+                            Ok(parser) => parser,
+                            Err(_) => {
+                                // On lock failure, emit any collected events and reset
+                                return if events_to_emit.is_empty() {
+                                    StateTransition::Reset
+                                } else {
+                                    StateTransition::EmitEvents(events_to_emit)
+                                };
+                            }
+                        };
+                        let result = config_parser
+                            .get_actions_for_button_event(input.button_name, "RELEASING")
+                            .is_some();
+                        drop(config_parser);
+                        result
+                    };
 
                     if has_releasing_action {
                         // Transition to RELEASING state to allow RELEASING event to fire
@@ -324,14 +348,19 @@ impl StateMachineLogic<ButtonState, ButtonEvent, ButtonInput> for HoldIntentLogi
                 StateTransition::Reset
             }
             (ButtonState::HELD, false) => {
-                // Button was released from HELD state - check if RELEASING is configured
                 let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
 
-                let config_parser = self.config_parser.lock().unwrap();
-                let has_releasing_action = config_parser
-                    .get_actions_for_button_event(input.button_name, "RELEASING")
-                    .is_some();
-                drop(config_parser);
+                let has_releasing_action = {
+                    let config_parser = match self.config_parser.lock() {
+                        Ok(parser) => parser,
+                        Err(_) => return StateTransition::Reset,
+                    };
+                    let result = config_parser
+                        .get_actions_for_button_event(input.button_name, "RELEASING")
+                        .is_some();
+                    drop(config_parser);
+                    result
+                };
 
                 if has_releasing_action {
                     println!(

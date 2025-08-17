@@ -108,19 +108,18 @@ impl TokenBasedParser {
         let button_key = button_name.as_str();
 
         // Check for per-button setting first (highest priority)
-        if let Some(button_config) = self.config.device.buttons.get(button_key) {
-            if let Some(button_settings) = &button_config.settings {
-                if let Some(threshold) = button_settings.hold_threshold_time_ms {
-                    return threshold;
-                }
-            }
+        if let Some(button_config) = self.config.device.buttons.get(button_key)
+            && let Some(button_settings) = &button_config.settings
+            && let Some(threshold) = button_settings.hold_threshold_time_ms
+        {
+            return threshold;
         }
 
         // Check for device-level setting (medium priority)
-        if let Some(device_settings) = &self.config.device.settings {
-            if let Some(threshold) = device_settings.hold_threshold_time_ms {
-                return threshold;
-            }
+        if let Some(device_settings) = &self.config.device.settings
+            && let Some(threshold) = device_settings.hold_threshold_time_ms
+        {
+            return threshold;
         }
 
         // Fall back to global default (lowest priority)
@@ -191,7 +190,10 @@ impl TokenBasedParser {
                     Some(ActionValue::Unicode(ch)) => *ch,
                     Some(ActionValue::Text(text)) => {
                         if text.chars().count() == 1 {
-                            text.chars().next().unwrap()
+                            match text.chars().next() {
+                                Some(ch) => ch,
+                                None => return Err("Unicode action requires a single character".into()),
+                            }
                         } else {
                             return Err("Unicode action requires a single character".into());
                         }

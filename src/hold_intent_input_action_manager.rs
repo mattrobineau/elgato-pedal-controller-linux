@@ -15,10 +15,11 @@ pub struct HoldIntentInputActionManager {
 impl HoldIntentInputActionManager {
     pub fn new(global_default_threshold_ms: u64) -> Result<Self, Box<dyn std::error::Error>> {
         let parser = HoldIntentParser::new(global_default_threshold_ms)
-            .expect("Failed to create HoldIntentParser");
+            .map_err(|e| format!("Failed to create HoldIntentParser: {}", e))?;
         let config_manager = ConfigManager::global();
         let config = config_manager.get_parser();
-        let input_simulator = InputSimulator::new().expect("Failed to create InputSimulator");
+        let input_simulator = InputSimulator::new()
+            .map_err(|e| format!("Failed to create InputSimulator: {}", e))?;
 
         Ok(HoldIntentInputActionManager {
             parser,
@@ -34,7 +35,7 @@ impl HoldIntentInputActionManager {
         let mut events = Vec::new();
         self.parser.parse_hid_data(data, now, |event| {
             events.push(event);
-        })?;
+        }).map_err(|e| format!("Failed to parse HID data: {}", e))?;
 
         // Then process the collected events
         for event in events {
@@ -49,8 +50,8 @@ impl HoldIntentInputActionManager {
     /// Process any pending timer-based events (scheduled releases, timeouts, etc.)
     /// This should be called regularly even when no HID data is received
     pub fn process_timers(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // Process scheduled key releases
-        self.input_simulator.process_scheduled_releases()?;
+        self.input_simulator.process_scheduled_releases()
+            .map_err(|e| format!("Failed to process scheduled releases: {}", e))?;
         Ok(())
     }
 
@@ -59,11 +60,10 @@ impl HoldIntentInputActionManager {
     pub fn process_button_timeouts(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let now = std::time::Instant::now();
 
-        // Collect events first to avoid borrowing issues
         let mut events = Vec::new();
         self.parser.process_button_timeouts(now, |event| {
             events.push(event);
-        })?;
+        }).map_err(|e| format!("Failed to process button timeouts: {}", e))?;
 
         // Then process the collected events
         for event in events {
@@ -80,12 +80,15 @@ impl HoldIntentInputActionManager {
         event: ButtonEvent,
     ) -> Result<(), Box<dyn std::error::Error>> {
         println!(
-            "🚀 Button {} event: {} -> executing actions",
+            "Button {} event: {} -> executing actions",
             event.button_name.as_str(),
             event.event_type.as_str()
         );
 
-        let config = self.config.lock().unwrap();
+        let config = match self.config.lock() {
+            Ok(config) => config,
+            Err(e) => return Err(format!("Failed to lock config: {}", e).into()),
+        };
         let actions = match event.event_type {
             ButtonEventType::PRESSED => {
                 config.get_actions_for_button_event(event.button_name, "PRESSED")
@@ -93,7 +96,7 @@ impl HoldIntentInputActionManager {
             ButtonEventType::HELD => config.get_actions_for_button_event(event.button_name, "HELD"),
             ButtonEventType::RELEASING => {
                 println!(
-                    "🔍 Looking for RELEASING actions for {}",
+                    "Looking for RELEASING actions for {}",
                     event.button_name.as_str()
                 );
                 let releasing_actions =
@@ -106,18 +109,18 @@ impl HoldIntentInputActionManager {
                 releasing_actions
             }
         };
-        drop(config); // Release the lock early
+        drop(config);
 
         if let Some(actions) = actions {
             println!(
-                " 🅾️ Button {} event: {}",
+                " Button {} event: {}",
                 event.button_name.as_str(),
                 event.event_type.as_str()
             );
             println!("> Executing {} actions", actions.len());
 
             for (i, action) in actions.iter().enumerate() {
-                println!(" 🥮 Executing action {}: {:?}", i + 1, action);
+                println!(" Executing action {}: {:?}", i + 1, action);
             }
 
             match self.input_simulator.execute_actions(&actions) {

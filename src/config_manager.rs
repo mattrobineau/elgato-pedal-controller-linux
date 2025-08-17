@@ -17,7 +17,13 @@ impl ConfigManager {
     /// Get the global shared config manager instance
     pub fn global() -> &'static ConfigManager {
         CONFIG_MANAGER.get_or_init(|| {
-            let parser = TokenBasedParser::new().expect("Failed to initialize config parser");
+            let parser = match TokenBasedParser::new() {
+                Ok(parser) => parser,
+                Err(e) => {
+                    eprintln!("Failed to initialize config parser: {}", e);
+                    std::process::exit(1);
+                }
+            };
             ConfigManager {
                 parser: Arc::new(Mutex::new(parser)),
             }
@@ -50,22 +56,22 @@ impl ConfigManager {
                 }
                 Err(e) => {
                     eprintln!(
-                        "❌ ERROR: Failed to parse config file at \"{}\"",
+                        "ERROR: Failed to parse config file at \"{}\"",
                         config_path.display()
                     );
-                    eprintln!("📄 Parse error: {e}");
+                    eprintln!("Parse error: {e}");
                     eprintln!();
                     eprintln!("⚠️  Your configuration file exists but contains invalid JSON.");
-                    eprintln!("🔧 Please fix the JSON syntax errors, or");
-                    eprintln!("🗑️  Delete the file to generate a new default config.");
+                    eprintln!("Please fix the JSON syntax errors, or");
+                    eprintln!(" Delete the file to generate a new default config.");
                     eprintln!();
-                    eprintln!("💡 Common JSON issues:");
+                    eprintln!("- Common JSON issues:");
                     eprintln!("   • Missing commas between objects");
                     eprintln!("   • Trailing commas after last items");
                     eprintln!("   • Unmatched brackets {{ }} or [ ]");
                     eprintln!("   • Missing quotes around strings");
                     eprintln!();
-                    eprintln!("🚫 Application cannot start with invalid config.");
+                    eprintln!("Application cannot start with invalid config.");
                     Err(format!("Invalid configuration file: {e}").into())
                 }
             }
