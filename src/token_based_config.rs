@@ -192,7 +192,9 @@ impl TokenBasedParser {
                         if text.chars().count() == 1 {
                             match text.chars().next() {
                                 Some(ch) => ch,
-                                None => return Err("Unicode action requires a single character".into()),
+                                None => {
+                                    return Err("Unicode action requires a single character".into());
+                                }
                             }
                         } else {
                             return Err("Unicode action requires a single character".into());

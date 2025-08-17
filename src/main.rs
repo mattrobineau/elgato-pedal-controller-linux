@@ -1,13 +1,13 @@
 use crate::hold_intent_input_action_manager::HoldIntentInputActionManager;
-use hidapi::HidApi;
 use clap::{Parser, Subcommand};
+use hidapi::HidApi;
 
 /// Elgato Stream Deck Pedal Controller for Linux
 #[derive(Parser)]
 #[command(name = "elgato-pedal-controller")]
 #[command(about = "A Linux controller for Elgato Stream Deck Pedal with systemd service support")]
 #[command(version)]
-struct CLI {
+struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -63,7 +63,7 @@ mod token_based_config;
 use service_manager::ServiceManager;
 
 fn main() {
-    let cli = CLI::parse();
+    let cli = Cli::parse();
 
     match cli.command.unwrap_or(Commands::Run) {
         Commands::Install { system } => {
@@ -95,22 +95,19 @@ fn main() {
 fn open_config_editor() {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let config_path = format!("{}/.config/elgato_pedal_controller.config.json", home);
-    
+
     println!("Configuration file location: {}", config_path);
-    
+
     let editors = ["code", "nano", "vim", "gedit", "xdg-open"];
-    
+
     for editor in &editors {
-        if let Ok(mut child) = std::process::Command::new(editor)
-            .arg(&config_path)
-            .spawn()
-        {
+        if let Ok(mut child) = std::process::Command::new(editor).arg(&config_path).spawn() {
             println!("Opening with {}...", editor);
             let _ = child.wait();
             return;
         }
     }
-    
+
     println!("No suitable editor found. Please edit the file manually:");
     println!("  {}", config_path);
 }
@@ -183,11 +180,7 @@ fn run_pedal_controller() {
                 let mut buf = [0u8; 8];
                 match device.read_timeout(&mut buf, 142) {
                     Ok(len) if len > 0 => {
-                        println!(
-                            "Received {} bytes from HID device: {:?}",
-                            len,
-                            &buf[..len]
-                        );
+                        println!("Received {} bytes from HID device: {:?}", len, &buf[..len]);
                         if let Err(e) = manager.process_hid_data(&buf) {
                             eprintln!("Error handling data: {e}");
                         }

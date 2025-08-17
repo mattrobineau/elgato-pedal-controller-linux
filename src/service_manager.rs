@@ -41,7 +41,7 @@ impl ServiceManager {
 
         println!("✅ Service installed and started successfully!");
         println!("   Service file: {}", service_file);
-        
+
         if system_wide {
             println!("   Status: sudo systemctl status {}", self.service_name);
             println!("   Stop with: sudo systemctl stop {}", self.service_name);
@@ -81,19 +81,23 @@ impl ServiceManager {
         let home = std::env::var("HOME")
             .map_err(|e| format!("Failed to get HOME environment variable: {}", e))?;
         let binary_path = format!("{}/.local/bin/{}", home, self.binary_name);
-        
+
         if !Path::new(&binary_path).exists() {
             return Err(format!(
-                "Binary not found at {}. Please run 'make install' first.", 
+                "Binary not found at {}. Please run 'make install' first.",
                 binary_path
-            ).into());
+            )
+            .into());
         }
 
         Ok(binary_path)
     }
 
     /// Get the systemd service directory
-    fn get_service_directory(&self, system_wide: bool) -> Result<String, Box<dyn std::error::Error>> {
+    fn get_service_directory(
+        &self,
+        system_wide: bool,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         if system_wide {
             Ok("/etc/systemd/system".to_string())
         } else {
@@ -106,7 +110,7 @@ impl ServiceManager {
     /// Generate the systemd service file content
     fn generate_service_file(&self, binary_path: &str) -> String {
         format!(
-r#"[Unit]
+            r#"[Unit]
 Description=Elgato Stream Deck Pedal Controller
 Documentation=https://github.com/funnierinspanish/elgato-pedal-controller-linux
 After=graphical-session.target
@@ -137,19 +141,22 @@ WantedBy=graphical-session.target
     /// Reload systemd daemon
     fn reload_systemd(&self, system_wide: bool) -> Result<(), Box<dyn std::error::Error>> {
         let mut cmd = Command::new("systemctl");
-        
+
         if !system_wide {
             cmd.arg("--user");
         }
-        
-        let output = cmd.arg("daemon-reload").output()
+
+        let output = cmd
+            .arg("daemon-reload")
+            .output()
             .map_err(|e| format!("Failed to execute systemctl daemon-reload: {}", e))?;
-        
+
         if !output.status.success() {
             return Err(format!(
-                "Failed to reload systemd: {}", 
+                "Failed to reload systemd: {}",
                 String::from_utf8_lossy(&output.stderr)
-            ).into());
+            )
+            .into());
         }
 
         Ok(())
@@ -158,14 +165,17 @@ WantedBy=graphical-session.target
     /// Enable the service
     fn enable_service(&self, system_wide: bool) -> Result<(), Box<dyn std::error::Error>> {
         let mut cmd = Command::new("systemctl");
-        
+
         if !system_wide {
             cmd.arg("--user");
         }
-        
-        let output = cmd.arg("enable").arg(&self.service_name).output()
+
+        let output = cmd
+            .arg("enable")
+            .arg(&self.service_name)
+            .output()
             .map_err(|e| format!("Failed to execute systemctl enable: {}", e))?;
-        
+
         if !output.status.success() {
             println!("⚠️  Warning: Could not enable service automatically");
             println!("   You may need to run manually:");
@@ -184,12 +194,15 @@ WantedBy=graphical-session.target
     /// Disable the service
     fn disable_service(&self, system_wide: bool) -> Result<(), Box<dyn std::error::Error>> {
         let mut cmd = Command::new("systemctl");
-        
+
         if !system_wide {
             cmd.arg("--user");
         }
-        
-        let _output = cmd.arg("disable").arg(&self.service_name).output()
+
+        let _output = cmd
+            .arg("disable")
+            .arg(&self.service_name)
+            .output()
             .map_err(|e| format!("Failed to execute systemctl disable: {}", e))?;
         Ok(())
     }
@@ -197,12 +210,15 @@ WantedBy=graphical-session.target
     /// Stop the service
     fn stop_service(&self, system_wide: bool) -> Result<(), Box<dyn std::error::Error>> {
         let mut cmd = Command::new("systemctl");
-        
+
         if !system_wide {
             cmd.arg("--user");
         }
-        
-        let _output = cmd.arg("stop").arg(&self.service_name).output()
+
+        let _output = cmd
+            .arg("stop")
+            .arg(&self.service_name)
+            .output()
             .map_err(|e| format!("Failed to execute systemctl stop: {}", e))?;
         Ok(())
     }
@@ -210,14 +226,17 @@ WantedBy=graphical-session.target
     /// Start the service
     fn start_service(&self, system_wide: bool) -> Result<(), Box<dyn std::error::Error>> {
         let mut cmd = Command::new("systemctl");
-        
+
         if !system_wide {
             cmd.arg("--user");
         }
-        
-        let output = cmd.arg("start").arg(&self.service_name).output()
+
+        let output = cmd
+            .arg("start")
+            .arg(&self.service_name)
+            .output()
             .map_err(|e| format!("Failed to execute systemctl start: {}", e))?;
-        
+
         if !output.status.success() {
             println!("⚠️  Warning: Could not start service automatically");
             println!("   Error: {}", String::from_utf8_lossy(&output.stderr));

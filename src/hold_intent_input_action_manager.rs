@@ -18,8 +18,8 @@ impl HoldIntentInputActionManager {
             .map_err(|e| format!("Failed to create HoldIntentParser: {}", e))?;
         let config_manager = ConfigManager::global();
         let config = config_manager.get_parser();
-        let input_simulator = InputSimulator::new()
-            .map_err(|e| format!("Failed to create InputSimulator: {}", e))?;
+        let input_simulator =
+            InputSimulator::new().map_err(|e| format!("Failed to create InputSimulator: {}", e))?;
 
         Ok(HoldIntentInputActionManager {
             parser,
@@ -33,9 +33,11 @@ impl HoldIntentInputActionManager {
 
         // Collect events first to avoid borrowing issues
         let mut events = Vec::new();
-        self.parser.parse_hid_data(data, now, |event| {
-            events.push(event);
-        }).map_err(|e| format!("Failed to parse HID data: {}", e))?;
+        self.parser
+            .parse_hid_data(data, now, |event| {
+                events.push(event);
+            })
+            .map_err(|e| format!("Failed to parse HID data: {}", e))?;
 
         // Then process the collected events
         for event in events {
@@ -50,7 +52,8 @@ impl HoldIntentInputActionManager {
     /// Process any pending timer-based events (scheduled releases, timeouts, etc.)
     /// This should be called regularly even when no HID data is received
     pub fn process_timers(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        self.input_simulator.process_scheduled_releases()
+        self.input_simulator
+            .process_scheduled_releases()
             .map_err(|e| format!("Failed to process scheduled releases: {}", e))?;
         Ok(())
     }
@@ -61,9 +64,11 @@ impl HoldIntentInputActionManager {
         let now = std::time::Instant::now();
 
         let mut events = Vec::new();
-        self.parser.process_button_timeouts(now, |event| {
-            events.push(event);
-        }).map_err(|e| format!("Failed to process button timeouts: {}", e))?;
+        self.parser
+            .process_button_timeouts(now, |event| {
+                events.push(event);
+            })
+            .map_err(|e| format!("Failed to process button timeouts: {}", e))?;
 
         // Then process the collected events
         for event in events {

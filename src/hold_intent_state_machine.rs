@@ -57,11 +57,13 @@ impl HoldIntentLogic {
     pub fn get_button_config(&self, button_name: &PhysicalButtonName) -> ButtonConfig {
         let config_parser = match self.config_parser.lock() {
             Ok(parser) => parser,
-            Err(_) => return ButtonConfig {
-                has_pressed_action: false,
-                has_held_action: false,
-                threshold_ms: self.global_default_threshold_ms,
-            },
+            Err(_) => {
+                return ButtonConfig {
+                    has_pressed_action: false,
+                    has_held_action: false,
+                    threshold_ms: self.global_default_threshold_ms,
+                };
+            }
         };
         let has_pressed_action = config_parser
             .get_actions_for_button_event(*button_name, "PRESSED")
