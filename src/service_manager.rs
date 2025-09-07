@@ -119,8 +119,6 @@ Wants=graphical-session.target
 [Service]
 Type=simple
 ExecStart={} run
-Restart=on-failure
-RestartSec=5
 Environment=DISPLAY=:0
 
 # Security settings
