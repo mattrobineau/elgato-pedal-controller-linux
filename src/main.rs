@@ -116,7 +116,7 @@ fn run_pedal_controller() {
     let app_config = AppConfig::default();
 
     println!(
-        "Starting Elgato Pedal Controller with {} button(s) and modern Token-based implementation...",
+        "\nAttempting to initialize controller for Elgato Pedal {} button(s)...\n",
         app_config.button_count
     );
 
@@ -134,7 +134,7 @@ fn run_pedal_controller() {
     let target_manufacturer = "Elgato";
     let target_product = "Stream Deck Pedal";
 
-    println!("Searching for Elgato Stream Deck Pedal...");
+    println!("\nSearching for Elgato Stream Deck Pedal...");
 
     let device_info = api
         .device_list()
@@ -152,7 +152,7 @@ fn run_pedal_controller() {
     match device_info {
         Some(device) => {
             println!(
-                "✅ Found target device: Vendor ID: {}, Product ID: {}, Manufacturer: '{}', Product: '{}'",
+                "\nSuccess:\n✅ Found target device: Vendor ID: {}, Product ID: {}, Manufacturer: '{}', Product: '{}'",
                 device.vendor_id(),
                 device.product_id(),
                 device
@@ -201,11 +201,12 @@ fn run_pedal_controller() {
             }
         }
         None => {
-            println!("❌ Elgato Stream Deck Pedal not found");
-            println!("Please ensure:");
-            println!("   - The device is connected via USB");
-            println!("   - Your user has the correct permissions (input group)");
-            println!("   - The device is not being used by another application");
+            eprintln!("\nError:");
+            eprintln!("❌ Elgato Stream Deck Pedal not found.");
+            eprintln!("Please ensure:");
+            eprintln!("   - The device is connected via USB");
+            eprintln!("   - Your user has the correct permissions (input group)");
+            eprintln!("   - The device is not being used by another application");
         }
     }
 }
