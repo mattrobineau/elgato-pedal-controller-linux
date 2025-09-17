@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Manages systemd service installation and configuration
@@ -80,17 +80,32 @@ impl ServiceManager {
     fn get_binary_path(&self) -> Result<String, Box<dyn std::error::Error>> {
         let home = std::env::var("HOME")
             .map_err(|e| format!("Failed to get HOME environment variable: {}", e))?;
-        let binary_path = format!("{}/.local/bin/{}", home, self.binary_name);
 
-        if !Path::new(&binary_path).exists() {
-            return Err(format!(
-                "Binary not found at {}. Please run 'make install' first.",
-                binary_path
-            )
-            .into());
+        let paths = [
+            PathBuf::from(format!("{}/.local/bin/{}", home, self.binary_name)),
+            PathBuf::from(format!("{}/.cargo/bin/{}", home, self.binary_name)),
+        ];
+
+        let first_path = paths.iter().find(|p| p.exists());
+
+        match first_path {
+            // Might be better to have get_binary_path return a Path object rather than a string
+            // Note that display() allows safely printing paths that may contain non-unicode data.
+            Some(path) => Ok(path.display().to_string()),
+            None => {
+                let searched: String = paths
+                    .iter()
+                    .map(|p| format!("\n\t {}", p.display()))
+                    .collect::<Vec<_>>()
+                    .join("");
+
+                Err(format!(
+                    "\nBinary not found at:{}\nPlease run 'make install' first.",
+                    searched
+                )
+                .into())
+            }
         }
-
-        Ok(binary_path)
     }
 
     /// Get the systemd service directory

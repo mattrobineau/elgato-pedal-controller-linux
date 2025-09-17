@@ -98,11 +98,26 @@ sudo usermod -aG input $USER
 
 Create a udev rule for proper device permissions:
 
+Ubuntu/Debian:
+
 ```bash
 sudo tee /etc/udev/rules.d/99-elgato-pedal.rules > /dev/null << 'EOF'
 # Elgato Stream Deck Pedal
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="0086", MODE="0666", GROUP="plugdev"
 SUBSYSTEM=="usb", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="0086", MODE="0666", GROUP="plugdev"
+EOF
+
+# Reload udev rules
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Arch/Fedora
+
+```bash
+sudo tee /etc/udev/rules.d/99-elgato-pedal.rules > /dev/null << 'EOF'
+# Elgato Stream Deck Pedal
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="0086", MODE="0666", GROUP="input"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="0fd9", ATTRS{idProduct}=="0086", MODE="0666", GROUP="input"
 EOF
 
 # Reload udev rules
