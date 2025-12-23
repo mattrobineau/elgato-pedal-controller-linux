@@ -3,6 +3,7 @@ use crate::config_manager::ConfigManager;
 use crate::hold_intent_parser::HoldIntentParser;
 use crate::input_simulator::InputSimulator;
 use crate::token_based_config::TokenBasedParser;
+use anyhow::{Context, Result, anyhow};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -13,13 +14,12 @@ pub struct HoldIntentInputActionManager {
 }
 
 impl HoldIntentInputActionManager {
-    pub fn new(global_default_threshold_ms: u64) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(global_default_threshold_ms: u64) -> Result<Self> {
         let parser = HoldIntentParser::new(global_default_threshold_ms)
-            .map_err(|e| format!("Failed to create HoldIntentParser: {}", e))?;
+            .context("Failed to create HoldIntentParser.")?;
         let config_manager = ConfigManager::global();
         let config = config_manager.get_parser();
-        let input_simulator =
-            InputSimulator::new().map_err(|e| format!("Failed to create InputSimulator: {}", e))?;
+        let input_simulator = InputSimulator::new().context("Failed to create InputSimulator.")?;
 
         Ok(HoldIntentInputActionManager {
             parser,
@@ -28,7 +28,7 @@ impl HoldIntentInputActionManager {
         })
     }
 
-    pub fn process_hid_data(&mut self, data: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn process_hid_data(&mut self, data: &[u8]) -> Result<()> {
         let now = Instant::now();
 
         // Collect events first to avoid borrowing issues
@@ -37,7 +37,7 @@ impl HoldIntentInputActionManager {
             .parse_hid_data(data, now, |event| {
                 events.push(event);
             })
-            .map_err(|e| format!("Failed to parse HID data: {}", e))?;
+            .context("Failed to parse HID data.")?;
 
         // Then process the collected events
         for event in events {
@@ -51,16 +51,16 @@ impl HoldIntentInputActionManager {
 
     /// Process any pending timer-based events (scheduled releases, timeouts, etc.)
     /// This should be called regularly even when no HID data is received
-    pub fn process_timers(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn process_timers(&mut self) -> Result<()> {
         self.input_simulator
             .process_scheduled_releases()
-            .map_err(|e| format!("Failed to process scheduled releases: {}", e))?;
+            .context("Failed to process scheduled releases.")?;
         Ok(())
     }
 
     /// Process button timeout events (evaluation windows, hold thresholds, etc.)
     /// This should be called regularly to handle state machine timeouts
-    pub fn process_button_timeouts(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn process_button_timeouts(&mut self) -> Result<()> {
         let now = std::time::Instant::now();
 
         let mut events = Vec::new();
@@ -68,7 +68,7 @@ impl HoldIntentInputActionManager {
             .process_button_timeouts(now, |event| {
                 events.push(event);
             })
-            .map_err(|e| format!("Failed to process button timeouts: {}", e))?;
+            .context("Failed to process button timeouts.")?;
 
         // Then process the collected events
         for event in events {
@@ -80,20 +80,18 @@ impl HoldIntentInputActionManager {
         Ok(())
     }
 
-    fn handle_button_event(
-        &mut self,
-        event: ButtonEvent,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn handle_button_event(&mut self, event: ButtonEvent) -> Result<()> {
         println!(
             "Button {} event: {} -> executing actions",
             event.button_name.as_str(),
             event.event_type.as_str()
         );
 
-        let config = match self.config.lock() {
-            Ok(config) => config,
-            Err(e) => return Err(format!("Failed to lock config: {}", e).into()),
-        };
+        let config = self
+            .config
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock config: {}", e))?;
+
         let actions = match event.event_type {
             ButtonEventType::PRESSED => {
                 config.get_actions_for_button_event(event.button_name, "PRESSED")

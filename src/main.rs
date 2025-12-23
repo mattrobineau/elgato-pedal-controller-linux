@@ -1,4 +1,5 @@
 use crate::hold_intent_input_action_manager::HoldIntentInputActionManager;
+use anyhow::anyhow;
 use clap::{Parser, Subcommand};
 use hidapi::HidApi;
 
@@ -62,7 +63,7 @@ mod token_based_config;
 
 use service_manager::ServiceManager;
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command.unwrap_or(Commands::Run) {
@@ -87,9 +88,10 @@ fn main() {
             open_config_editor();
         }
         Commands::Run => {
-            run_pedal_controller();
+            run_pedal_controller()?;
         }
     }
+    Ok(())
 }
 
 fn open_config_editor() {
@@ -112,7 +114,7 @@ fn open_config_editor() {
     println!("  {}", config_path);
 }
 
-fn run_pedal_controller() {
+fn run_pedal_controller() -> anyhow::Result<()> {
     let app_config = AppConfig::default();
 
     println!(
@@ -125,7 +127,7 @@ fn run_pedal_controller() {
         Ok(mgr) => mgr,
         Err(e) => {
             eprintln!("Failed to create input action manager: {e}");
-            return;
+            return Err(e);
         }
     };
 
@@ -170,7 +172,7 @@ fn run_pedal_controller() {
                     eprintln!(
                         "Make sure you have the correct permissions (try adding your user to the 'input' group)"
                     );
-                    return;
+                    return Err(anyhow!("Failed to open the target device: {}", error));
                 }
             };
 
@@ -178,6 +180,7 @@ fn run_pedal_controller() {
 
             loop {
                 let mut buf = [0u8; 8];
+
                 match device.read_timeout(&mut buf, 142) {
                     Ok(len) if len > 0 => {
                         println!("Received {} bytes from HID device: {:?}", len, &buf[..len]);
@@ -195,7 +198,7 @@ fn run_pedal_controller() {
                     }
                     Err(err) => {
                         eprintln!("Error reading from device: {err}");
-                        break;
+                        return Err(anyhow!("Error reading from device: {}", err));
                     }
                 }
             }
@@ -207,6 +210,11 @@ fn run_pedal_controller() {
             eprintln!("   - The device is connected via USB");
             eprintln!("   - Your user has the correct permissions (input group)");
             eprintln!("   - The device is not being used by another application");
+            Err(anyhow!(
+                "Device not found for target manufacturer {} and target product {}.",
+                target_manufacturer,
+                target_product,
+            ))
         }
     }
 }
