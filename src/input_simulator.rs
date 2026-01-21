@@ -124,7 +124,7 @@ impl InputSimulator {
                 }
                 ExecutableAction::Text { text } => {
                     self.execute_text(text.clone())
-                        .context(format!("Failed to execute text input for {}", text))?;
+                        .context("Failed to execute text input")?;
                 }
                 ExecutableAction::Sleep { duration_ms } => {
                     self.execute_sleep(*duration_ms)
