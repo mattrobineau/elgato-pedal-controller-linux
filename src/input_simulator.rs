@@ -116,7 +116,7 @@ impl InputSimulator {
             match action {
                 ExecutableAction::KeyPress { key, auto_release } => {
                     self.execute_key_press(*key, *auto_release)
-                        .context(format!("Failed to execute key press"))?;
+                        .context(format!("Failed to execute key press for {:?}", key))?;
                 }
                 ExecutableAction::KeyRelease { key } => {
                     self.execute_key_release(*key)
