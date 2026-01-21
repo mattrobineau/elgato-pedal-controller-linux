@@ -111,7 +111,7 @@ EOF
 sudo udevadm control --reload-rules && sudo udevadm trigger
 ```
 
-Arch/Fedora
+Arch/Fedora:
 
 ```bash
 sudo tee /etc/udev/rules.d/99-elgato-pedal.rules > /dev/null << 'EOF'
