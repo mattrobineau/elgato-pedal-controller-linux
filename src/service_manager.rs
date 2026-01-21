@@ -95,7 +95,7 @@ impl ServiceManager {
             None => {
                 let searched: String = paths
                     .iter()
-                    .map(|p| format!("\n\t {}", p.display()))
+                    .map(|p| format!("\n         {}", p.display()))
                     .collect::<Vec<_>>()
                     .join("");
 
