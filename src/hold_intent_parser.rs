@@ -13,7 +13,7 @@ pub struct HoldIntentParser {
 }
 
 impl HoldIntentParser {
-    pub fn new(global_default_threshold_ms: u64) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(global_default_threshold_ms: u64) -> anyhow::Result<Self> {
         let config_manager = ConfigManager::global();
         let config_parser = config_manager.get_parser();
         Ok(Self {
@@ -28,7 +28,7 @@ impl HoldIntentParser {
         data: &[u8],
         now: Instant,
         mut event_handler: F,
-    ) -> Result<(), Box<dyn std::error::Error>>
+    ) -> anyhow::Result<()>
     where
         F: FnMut(ButtonEvent),
     {
@@ -151,7 +151,7 @@ impl HoldIntentParser {
         &mut self,
         now: Instant,
         mut event_handler: F,
-    ) -> Result<(), Box<dyn std::error::Error>>
+    ) -> anyhow::Result<()>
     where
         F: FnMut(ButtonEvent),
     {

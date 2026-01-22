@@ -1,4 +1,5 @@
 use crate::token_based_config::ExecutableAction;
+use anyhow::{Context, Result};
 use enigo::Keyboard;
 use enigo::{
     Direction, Enigo, Key, Settings,
@@ -14,7 +15,7 @@ pub struct InputSimulator {
 }
 
 impl InputSimulator {
-    pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new() -> Result<Self> {
         println!("Initializing Input Simulation System");
         println!("{}", "=".repeat(80));
 
@@ -67,8 +68,7 @@ impl InputSimulator {
 
         println!("{}", "=".repeat(80));
 
-        let enigo = Enigo::new(&Settings::default())
-            .map_err(|e| format!("Failed to create Enigo instance: {}", e))?;
+        let enigo = Enigo::new(&Settings::default()).context("Failed to create Enigo instance.")?;
 
         let _test_token = Token::Key(Key::Escape, Direction::Press);
         println!("Input simulation system initialized successfully");
@@ -80,10 +80,7 @@ impl InputSimulator {
         })
     }
 
-    pub fn execute_actions(
-        &mut self,
-        actions: &[ExecutableAction],
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn execute_actions(&mut self, actions: &[ExecutableAction]) -> Result<()> {
         if actions.is_empty() {
             return Ok(());
         }
@@ -118,24 +115,20 @@ impl InputSimulator {
 
             match action {
                 ExecutableAction::KeyPress { key, auto_release } => {
-                    if let Err(e) = self.execute_key_press(*key, *auto_release) {
-                        return Err(format!("Failed to execute key press: {}", e).into());
-                    }
+                    self.execute_key_press(*key, *auto_release)
+                        .context(format!("Failed to execute key press for {:?}", key))?;
                 }
                 ExecutableAction::KeyRelease { key } => {
-                    if let Err(e) = self.execute_key_release(*key) {
-                        return Err(format!("Failed to execute key release: {}", e).into());
-                    }
+                    self.execute_key_release(*key)
+                        .context("Failed to execute key release")?;
                 }
                 ExecutableAction::Text { text } => {
-                    if let Err(e) = self.execute_text(text.clone()) {
-                        return Err(format!("Failed to execute text input: {}", e).into());
-                    }
+                    self.execute_text(text.clone())
+                        .context("Failed to execute text input")?;
                 }
                 ExecutableAction::Sleep { duration_ms } => {
-                    if let Err(e) = self.execute_sleep(*duration_ms) {
-                        return Err(format!("Failed to execute sleep: {}", e).into());
-                    }
+                    self.execute_sleep(*duration_ms)
+                        .context("Failed to execute sleep.")?;
                 }
                 ExecutableAction::ReleaseAfter { duration_ms } => {
                     self.schedule_release_all_after(*duration_ms);
@@ -157,69 +150,48 @@ impl InputSimulator {
         Ok(())
     }
 
-    fn execute_key_press(
-        &mut self,
-        key: Key,
-        auto_release: bool,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    fn execute_key_press(&mut self, key: Key, auto_release: bool) -> Result<()> {
         let press_token = Token::Key(key, Direction::Press);
 
-        match self.enigo.execute(&press_token) {
-            Ok(_) => {
-                self.pressed_keys.insert(key);
+        self.enigo
+            .execute(&press_token)
+            .context("Failed to execute key press.")?;
 
-                if auto_release {
-                    let release_token = Token::Key(key, Direction::Release);
-                    match self.enigo.execute(&release_token) {
-                        Ok(_) => {
-                            self.pressed_keys.remove(&key);
-                        }
-                        Err(e) => {
-                            eprintln!("Error: Failed to auto-release key {:?}: {}", key, e);
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("Error: Failed to press key {:?}: {}", key, e);
-                return Err(format!("Failed to execute key press: {e}").into());
-            }
+        self.pressed_keys.insert(key);
+
+        if auto_release {
+            let release_token = Token::Key(key, Direction::Release);
+            self.enigo
+                .execute(&release_token)
+                .context("Failed to auto-release key.")?;
+            self.pressed_keys.remove(&key);
         }
 
         Ok(())
     }
 
-    fn execute_key_release(&mut self, key: Key) -> Result<(), Box<dyn std::error::Error>> {
+    fn execute_key_release(&mut self, key: Key) -> Result<()> {
         if self.pressed_keys.contains(&key) {
             let release_token = Token::Key(key, Direction::Release);
 
-            match self.enigo.execute(&release_token) {
-                Ok(_) => {
-                    self.pressed_keys.remove(&key);
-                }
-                Err(e) => {
-                    eprintln!("Error: Failed to release key {:?}: {}", key, e);
-                    return Err(format!("Failed to execute key release: {e}").into());
-                }
-            }
+            self.enigo
+                .execute(&release_token)
+                .context("Failed to execute key release.")?;
+
+            self.pressed_keys.remove(&key);
         }
 
         Ok(())
     }
 
-    fn execute_text(&mut self, text: String) -> Result<(), Box<dyn std::error::Error>> {
-        match self.enigo.text(&text) {
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("Error: Failed to execute text input: {}", e);
-                return Err(format!("Failed to execute text: {e}").into());
-            }
-        }
-
+    fn execute_text(&mut self, text: String) -> Result<()> {
+        self.enigo
+            .text(&text)
+            .context("Failed to execute text input.")?;
         Ok(())
     }
 
-    fn execute_sleep(&self, duration_ms: u64) -> Result<(), Box<dyn std::error::Error>> {
+    fn execute_sleep(&self, duration_ms: u64) -> Result<()> {
         std::thread::sleep(Duration::from_millis(duration_ms));
         Ok(())
     }
@@ -244,7 +216,7 @@ impl InputSimulator {
         }
     }
 
-    pub fn process_scheduled_releases(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn process_scheduled_releases(&mut self) -> Result<()> {
         let now = Instant::now();
         let mut releases_to_process = Vec::new();
 
