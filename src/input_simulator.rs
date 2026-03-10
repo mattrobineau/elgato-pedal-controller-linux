@@ -80,6 +80,12 @@ impl InputSimulator {
         })
     }
 
+    pub fn reconnect(&mut self) -> Result<()> {
+        let enigo = Enigo::new(&Settings::default()).context("Failed to create Enigo instance.")?;
+        self.enigo = enigo;
+        Ok(())
+    }
+
     pub fn execute_actions(&mut self, actions: &[ExecutableAction]) -> Result<()> {
         if actions.is_empty() {
             return Ok(());
