@@ -130,9 +130,9 @@ impl HoldIntentInputActionManager {
                 Ok(_) => {}
                 Err(e) => {
                     eprintln!("Failed to execute actions: {e}");
-                    if format!("{e:?}").contains("Wayland")
-                        || format!("{e:?}").contains("Broken Pipe")
-                    {
+                    let error = e.to_string();
+
+                    if error.contains("Wayland") || error.contains("Broken pipe") {
                         eprintln!(
                             "Warning: Wayland connection lost during action execution. Recreating backend."
                         );
